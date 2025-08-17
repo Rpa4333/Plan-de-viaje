@@ -1,0 +1,3669 @@
+Option Explicit
+
+'---------------------
+' Definición de tipo
+'---------------------
+Private Type Alternante
+  idx   As Long
+  wUnit As Double
+  cap   As Long
+End Type
+
+Sub Plan_de_Viaje_copilot_v58()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets(1)
+
+    Dim mododebug As Boolean
+    mododebug = True
+
+    ' Variables
+    Dim cartera As Variant, pesos As Variant, alturas As Variant, familias As Variant, lcorto As Variant
+    Dim combinacionesPermitidas As Variant, nuevadisponibilidadusada As Variant, diaUltimaDisponibilidad  As Long
+    Dim i As Long, j As Long, k As Long, L As Long, m As Long, n As Long, o As Long, p As Long, q As Long
+    Dim fila As Long, numCamion As Long, Pmax As Double, Pmin As Double, Altmax As Double
+    Dim bestFila As Long, startTime As Double, endTime As Double, numArticulos As Long
+    Dim camionesDiarios As Long, diaActual As Long, camionesHoy As Long, diferenciaPunt As Double
+    Dim stockDia1 As Variant, stockDisponible As Variant, stock2Disponibilidad As Variant, dia2Disponibilidad As Variant
+    
+    Dim validCombinacion As Boolean, numartCargadosenCiclo As Long, numartCargablesenCiclo As Long, articulosnuevosmejor As Long
+    Dim numartNoCargadosenCiclo As Long, cantUrgentesCartera As Long, articulosNuevos As Long, cicloCompleto As Boolean
+    Dim cantUrgentesCargablesCartera As Long, CargablesPorOrden As Variant, urgentesComb As Variant, urgentesCargablesComb As Variant
+    Dim cantUrgentesCargablesComb As Long, nArtUrgCargablesCartera As Long, numArtCargablesCartera As Long, cantCargablesCartera As Long
+
+    Dim combinacion As Variant, UrgentesCartera As Variant, cantUrgentesComb As Long, pesocomb As Double
+    Dim alturaTotal As Double, NartComb As Long, Pila1 As Variant, Pila2 As Variant, Capa1 As Variant, Capa2 As Variant
+    Dim maxUrgentes As Long, maxPesoComb As Double, bestAlturaTotal As Double, minNart As Long, cantCargablesComb As Long
+    Dim bestPila1 As Variant, bestPila2 As Variant, bestCapa1 As Variant, bestCapa2 As Variant, cargablesCartera As Variant
+
+    Dim bestCombinacion As Variant, necesitaAlternancia As Boolean, indiceProducto As Long, cumplealternancia As Boolean
+    Dim articulosCargadosEnCiclo As Variant, ultimaCombinacionCargada(0 To 6) As Long, cicloActualPrevio As Long
+    
+    Dim mejorOrdenCarga As Double, mejorproximidad As Double, mejorEncontrada As Boolean, nArtCargablesOrden As Long
+    Dim puntajeMejor As Double, puntaje As Double
+    Dim ultimoArticuloPorFamilia As Object
+    Set ultimoArticuloPorFamilia = CreateObject("Scripting.Dictionary")
+      
+    ' Iniciar el temporizador
+    startTime = Timer
+    
+    ' Desactivar la actualización de pantalla, cálculo automático y eventos
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
+    
+    ' Borrar toda el área de escritura antes de comenzar
+    ws.Range("A30:CH500").ClearContents
+    
+    ' Leer datos desde el Excel
+    cartera = ws.Range("B4:H4").Value
+    familias = ws.Range("B2:H2").Value
+    pesos = ws.Range("B9:H9").Value
+    alturas = ws.Range("B10:H10").Value
+
+    UrgentesCartera = ws.Range("B7:H7").Value
+    combinacionesPermitidas = ws.Range("V3:AG13").Value
+    Pmax = ws.Range("T17").Value
+    Pmin = ws.Range("T18").Value
+    Altmax = ws.Range("T19").Value
+    camionesDiarios = ws.Range("P19").Value
+    ' ******************************************************************************************************************************
+    numArticulos = 7  '**************************************** HE FIJADO ESTE NUMERO PARA LAS PRUEBAS *****************************
+    ' ******************************************************************************************************************************
+    lcorto = ws.Range("B25:H25").Value
+    For p = 1 To 7
+        lcorto(1, p) = UCase(Trim(lcorto(1, p)))
+    Next p
+    
+    ' Leer el Stock hoy, fecha y Stock de 2ª disponibilidad. Inicializa stockdisponible
+    stockDia1 = ws.Range("B12:H12").Value            ' Stock disponible día 1
+    stock2Disponibilidad = ws.Range("B15:H15").Value ' Stock segunda disponibilidad
+    dia2Disponibilidad = ws.Range("B14:H14").Value   ' Fechas de segunda disponibilidad
+    ReDim stockDisponible(1 To 1, 1 To 7)
+    ReDim nuevadisponibilidadusada(1 To 7)
+    diaUltimaDisponibilidad = 0
+    For p = 1 To 7
+        stockDisponible(1, p) = stockDia1(1, p)
+        nuevadisponibilidadusada(p) = 0
+        ' Calcular última fecha de disponibilidad necesaria
+        If cartera(1, p) > stockDia1(1, p) Then
+           If dia2Disponibilidad(1, p) > diaUltimaDisponibilidad Then
+                diaUltimaDisponibilidad = dia2Disponibilidad(1, p)
+            End If
+        End If
+    Next p
+    ' Valor por defecto si no hay segundas disponibilidades
+    If diaUltimaDisponibilidad = 0 Then diaUltimaDisponibilidad = 1
+    
+    ' Leer el orden de carga y las toneladas a cargar. Fechas 1 y 2 de carga y sus toneladas
+    Dim ordencarga As Variant, npaqOrdenCarga As Variant
+    Dim fecha1Carga As Variant, fecha2Carga As Variant, fecha3Carga As Variant, tmFecha1Carga As Variant, tmFecha2Carga As Variant
+    Dim ExisteOrdenCarga As Boolean
+    Dim npaqmax As Variant, npaqfecha1Carga As Variant, npaqfecha2Carga As Variant, npaqfecha3Carga As Variant
+    ordencarga = ws.Range("B16:H16").Value
+    npaqOrdenCarga = ws.Range("B18:H18").Value
+    fecha1Carga = ws.Range("B19:H19").Value 'No cargar nada antes de esta fecha
+    tmFecha1Carga = ws.Range("B20:H20").Value 'Tm max a cargar despues de fecha1Carga
+    fecha2Carga = ws.Range("B21:H21").Value
+    tmFecha2Carga = ws.Range("B22:H22").Value
+    fecha3Carga = ws.Range("B23:H23").Value 'Carga el resto despues de esta fecha
+    
+    ' Definir los paquetes en funcion del orden de carga
+    For p = 1 To 7
+        If IsEmpty(ordencarga(1, p)) Or IsNull(ordencarga(1, p)) Then
+            ordencarga(1, p) = 0
+        Else
+            If ordencarga(1, p) > 0 And npaqOrdenCarga(1, p) = 0 Then
+                npaqOrdenCarga(1, p) = cartera(1, p)   ' si hay orden y no se definen la cantidad, se entiende que es todo
+            End If
+        End If
+    Next p
+    
+    ' Inicializar npaqFechaX  para la asignación inicial segun las fechas de carga impuestas
+    Dim maxFechaCarga As Long: maxFechaCarga = 0
+    Dim cantCargableFecha1 As Long, cantCargableFecha2 As Long, cantCargableFecha3 As Long
+    ReDim npaqmax(1 To 7) As Long
+    ReDim npaqfecha1Carga(1 To 7) As Long
+    ReDim npaqfecha2Carga(1 To 7) As Long
+    ReDim npaqfecha3Carga(1 To 7) As Long
+
+    For p = 1 To 7
+    npaqfecha1Carga(p) = 0
+    npaqfecha2Carga(p) = 0
+    npaqfecha3Carga(p) = 0
+
+    ' Normalización de las fechas y TM leídas de la celda (temporal para el cálculo inicial)
+        If IsEmpty(fecha1Carga(1, p)) Or IsNull(fecha1Carga(1, p)) Then fecha1Carga(1, p) = 0
+        If IsEmpty(tmFecha1Carga(1, p)) Or IsNull(tmFecha1Carga(1, p)) Then tmFecha1Carga(1, p) = 0
+        If IsEmpty(fecha2Carga(1, p)) Or IsNull(fecha2Carga(1, p)) Then fecha2Carga(1, p) = 0
+        If IsEmpty(tmFecha2Carga(1, p)) Or IsNull(tmFecha2Carga(1, p)) Then tmFecha2Carga(1, p) = 0
+        If IsEmpty(fecha3Carga(1, p)) Or IsNull(fecha3Carga(1, p)) Then fecha3Carga(1, p) = 0
+
+        Dim carteraInicialArticulo As Long
+        carteraInicialArticulo = cartera(1, p) ' Usamos la cartera inicial para la distribución
+        Dim paquetesPendientesDeAsignar As Long
+        paquetesPendientesDeAsignar = carteraInicialArticulo
+        If fecha1Carga(1, p) = 0 Then
+            npaqfecha1Carga(p) = carteraInicialArticulo
+        Else ' fecha1Carga(1,p) está definida (>0)
+            If tmFecha1Carga(1, p) = 0 Then
+                npaqfecha1Carga(p) = carteraInicialArticulo
+                ' npaqFecha2Carga y npaqFecha3Carga se quedan en 0.
+                fecha2Carga(1, p) = 0
+                fecha3Carga(1, p) = 0
+            Else ' fecha1Carga(1,p) y tmFecha1Carga(1,p) están definidos.
+                ' Asignar la primera fase con su límite de TM.
+                npaqfecha1Carga(p) = Application.Min(paquetesPendientesDeAsignar, Application.RoundUp(tmFecha1Carga(1, p) / pesos(1, p), 0))
+                paquetesPendientesDeAsignar = Application.Max(0, paquetesPendientesDeAsignar - npaqfecha1Carga(p))
+                ' fecha2Carga=0. Si hay fecha3Carga, el resto de la cartera va allí. Si no, no se asigna a fase 3.
+                If fecha2Carga(1, p) = 0 Then
+                    If fecha3Carga(1, p) > 0 Then
+                        npaqfecha3Carga(p) = paquetesPendientesDeAsignar
+                    End If
+                    tmFecha2Carga(1, p) = 0
+                Else ' fecha2Carga>0
+                    If tmFecha2Carga(1, p) = 0 Then
+                        npaqfecha2Carga(p) = paquetesPendientesDeAsignar
+                        fecha3Carga(1, p) = 0
+                    Else ' fecha2Carga>0 y tmFecha2Carga>0
+                        npaqfecha2Carga(p) = Application.Min(paquetesPendientesDeAsignar, Application.RoundUp(tmFecha2Carga(1, p) / pesos(1, p), 0))
+                        paquetesPendientesDeAsignar = Application.Max(0, paquetesPendientesDeAsignar - npaqfecha2Carga(p))
+                        '  Asignación a npaqFecha3Carga si fecha3Carga>0
+                        If fecha3Carga(1, p) > 0 Then
+                            npaqfecha3Carga(p) = paquetesPendientesDeAsignar
+                        End If
+                    End If ' Fin If tmFecha2Carga(1,p) = 0
+                End If ' Fin If fecha2Carga(1,p) = 0
+            End If ' Fin If tmFecha1Carga(1,p) = 0
+        End If ' Fin If fecha1Carga(1,p) = 0
+        ' Calcular la fecha de carga máxima
+        maxFechaCarga = Application.Max(maxFechaCarga, fecha1Carga(1, p))
+        maxFechaCarga = Application.Max(maxFechaCarga, fecha2Carga(1, p))
+        maxFechaCarga = Application.Max(maxFechaCarga, fecha3Carga(1, p))
+    Next p
+    cantCargableFecha1 = Application.WorksheetFunction.Sum(npaqfecha1Carga)
+    cantCargableFecha2 = Application.WorksheetFunction.Sum(npaqfecha2Carga)
+    cantCargableFecha3 = Application.WorksheetFunction.Sum(npaqfecha3Carga)
+    Debug.Print "fecha1carga = ("; fecha1Carga(1, 1); ", "; fecha1Carga(1, 2); ", "; fecha2Carga(1, 3); _
+                  ", "; fecha1Carga(1, 4); ", "; fecha1Carga(1, 5); ", "; ; fecha1Carga(1, 6); ", "; fecha1Carga(1, 7); ")"
+    Debug.Print "fecha2carga = ("; fecha2Carga(1, 1); ", "; fecha2Carga(1, 2); ", "; fecha2Carga(1, 3); _
+                    ", "; fecha2Carga(1, 4); ", "; fecha2Carga(1, 5); ", "; ; fecha2Carga(1, 6); ", "; fecha2Carga(1, 7); ")"
+    Debug.Print "fecha3carga = ("; fecha3Carga(1, 1); ", "; fecha3Carga(1, 2); ", "; fecha3Carga(1, 3); _
+                    ", "; fecha3Carga(1, 4); ", "; fecha3Carga(1, 5); ", "; ; fecha3Carga(1, 6); ", "; fecha3Carga(1, 7); ")"
+    Debug.Print "npaqfecha1carga = ("; npaqfecha1Carga(1); ", "; npaqfecha1Carga(2); ", "; npaqfecha2Carga(3); _
+                    ", "; npaqfecha1Carga(4); ", "; npaqfecha1Carga(5); ", "; ; npaqfecha1Carga(6); ", "; npaqfecha1Carga(7); ")"
+    Debug.Print "npaqfecha2Carga (= ("; npaqfecha2Carga(1); ", "; npaqfecha2Carga(2); ", "; npaqfecha2Carga(3); _
+                    ", "; npaqfecha2Carga(4); ", "; npaqfecha2Carga(5); ", "; ; npaqfecha2Carga(6); ", "; npaqfecha2Carga(7); ")"
+    Debug.Print "npaqfecha3Carga (= ("; npaqfecha3Carga(1); ", "; npaqfecha3Carga(2); ", "; npaqfecha3Carga(3); _
+                    ", "; npaqfecha3Carga(4); ", "; npaqfecha3Carga(5); ", "; ; npaqfecha3Carga(6); ", "; npaqfecha3Carga(7); ")"
+    Debug.Print "maxFechaCarga = "; maxFechaCarga
+    
+    ' Crear un diccionario para mapear las familias a sus posiciones en la matriz de compatibilidad
+    Dim dict As Object
+    Set dict = CreateObject("Scripting.Dictionary")
+    Dim pos As Long
+    For pos = 1 To 10
+        If Not IsEmpty(ws.Cells(2, pos + 21).Value) And Not dict.exists(ws.Cells(2, pos + 21).Value) Then
+            dict.Add ws.Cells(2, pos + 21).Value, pos
+        End If
+    Next pos
+    
+    ' Leer los valores específicos para cada familia
+    Dim NminPaqFamilia As Variant, NmaxPaqFamilia As Variant, MaxPaqCapaFamilia As Variant, NmaxPaqCapCortoFamilia As Variant
+    Dim alternanciaFamilia As Variant, valalternancia As String, familiasParametros As Variant
+    NminPaqFamilia = ws.Range("Q3:Q15").Value
+    NmaxPaqFamilia = ws.Range("R3:R15").Value
+    MaxPaqCapaFamilia = ws.Range("S3:S15").Value
+    NmaxPaqCapCortoFamilia = ws.Range("T3:T15").Value
+    alternanciaFamilia = ws.Range("M3:M15").Value
+    familiasParametros = ws.Range("O3:O15").Value 'Incluye la fila "Mixto"
+    
+    ' Crear un diccionario para almacenar los valores de NminPaq, NmaxPaq, MaxPaqCapa y NmaxPaqCapCorto según la familia
+    Dim dictFamilias As Object
+    Set dictFamilias = CreateObject("Scripting.Dictionary")
+    ' Agregar valores al diccionario
+    dictFamilias.Add "BARRA", Array(NminPaqFamilia(1, 1), NmaxPaqFamilia(1, 1), MaxPaqCapaFamilia(1, 1), NmaxPaqCapCortoFamilia(1, 1), alternanciaFamilia(1, 1))
+    dictFamilias.Add "SPOOL", Array(NminPaqFamilia(2, 1), NmaxPaqFamilia(2, 1), MaxPaqCapaFamilia(2, 1), NmaxPaqCapCortoFamilia(2, 1), alternanciaFamilia(2, 1))
+    dictFamilias.Add "STRETCHING", Array(NminPaqFamilia(3, 1), NmaxPaqFamilia(3, 1), MaxPaqCapaFamilia(3, 1), NmaxPaqCapCortoFamilia(3, 1), alternanciaFamilia(3, 1))
+    dictFamilias.Add "ROLLO", Array(NminPaqFamilia(4, 1), NmaxPaqFamilia(4, 1), MaxPaqCapaFamilia(4, 1), NmaxPaqCapCortoFamilia(4, 1), alternanciaFamilia(4, 1))
+    dictFamilias.Add "CARRETE", Array(NminPaqFamilia(5, 1), NmaxPaqFamilia(5, 1), MaxPaqCapaFamilia(5, 1), NmaxPaqCapCortoFamilia(5, 1), alternanciaFamilia(5, 1))
+    dictFamilias.Add "ALAMBRON", Array(NminPaqFamilia(6, 1), NmaxPaqFamilia(6, 1), MaxPaqCapaFamilia(6, 1), NmaxPaqCapCortoFamilia(6, 1), alternanciaFamilia(6, 1))
+    dictFamilias.Add "COMERCIALES", Array(NminPaqFamilia(7, 1), NmaxPaqFamilia(7, 1), MaxPaqCapaFamilia(7, 1), NmaxPaqCapCortoFamilia(7, 1), alternanciaFamilia(7, 1))
+    dictFamilias.Add "ESTRUCTURALES", Array(NminPaqFamilia(8, 1), NmaxPaqFamilia(8, 1), MaxPaqCapaFamilia(8, 1), NmaxPaqCapCortoFamilia(8, 1), alternanciaFamilia(8, 1))
+    dictFamilias.Add "MALLA", Array(NminPaqFamilia(9, 1), NmaxPaqFamilia(9, 1), MaxPaqCapaFamilia(9, 1), NmaxPaqCapCortoFamilia(9, 1), alternanciaFamilia(9, 1))
+    dictFamilias.Add "PALANQUILLA", Array(NminPaqFamilia(10, 1), NmaxPaqFamilia(10, 1), MaxPaqCapaFamilia(10, 1), NmaxPaqCapCortoFamilia(10, 1), alternanciaFamilia(10, 1))
+    dictFamilias.Add "SEPARADORES", Array(NminPaqFamilia(11, 1), NmaxPaqFamilia(11, 1), MaxPaqCapaFamilia(11, 1), NmaxPaqCapCortoFamilia(11, 1), alternanciaFamilia(11, 1))
+    dictFamilias.Add "Mixto", Array(NminPaqFamilia(13, 1), NmaxPaqFamilia(13, 1), MaxPaqCapaFamilia(13, 1), NmaxPaqCapCortoFamilia(13, 1), alternanciaFamilia(13, 1))
+
+    ' crear un array de alternancias y nº paquetes por capa por artículo
+    ' ya no hay que usar el acceso al diccionarfio que da problemas. Usar alternanciaArticulos(p), MaxPaqCap(p)
+    Dim alternanciaArticulos(1 To 7) As String, familiaActual As String, MaxPaqCap(1 To 7) As Variant
+    For p = 1 To 7
+        familiaActual = familias(1, p)
+        alternanciaArticulos(p) = dictFamilias(familiaActual)(4)
+        alternanciaArticulos(p) = UCase(alternanciaArticulos(p))
+        If lcorto(1, p) = "SI" Then
+            MaxPaqCap(p) = dictFamilias(familiaActual)(3)
+        Else
+            MaxPaqCap(p) = dictFamilias(familiaActual)(2)
+        End If
+        ' Debug.Print "Familia Actual=  "; familiaActual; ", Alternancia = " & alternanciaArticulos(p); ", NmaxPaqFam="; MaxPaqCap(p) ' Para verificar
+    Next p
+       
+    ' Variables para rastrear los artículos cargados y cargable en el ciclo actual
+    Dim articulosCargados As Variant
+    ReDim articulosCargados(1 To 7)
+    ReDim articulosCargadosEnCiclo(1 To 7)
+    Dim EsarticuloCargableEnCiclo As Variant
+    ReDim EsarticuloCargableEnCiclo(1 To 7)
+    Dim esautosuficiente(1 To 7) As Boolean
+    Dim urgentesCargablesCartera As Variant
+    ReDim urgentesCargablesCartera(1 To 7) As Long
+    ReDim cargablesComb(1 To 7) As Long
+    ReDim cargablesCartera(1 To 7) As Long
+    ReDim urgentesComb(1 To 7) As Long
+    ReDim urgentesCargablesComb(1 To 7) As Long
+    ReDim CargablesPorOrden(1 To 7) As Long
+    Dim ordenesPrioritarias As Variant
+    For p = 1 To 7
+        esautosuficiente(p) = False
+        cargablesCartera(p) = 0
+        urgentesCargablesCartera(p) = 0
+        CargablesPorOrden(p) = 0
+        articulosCargados(p) = 0
+        articulosCargadosEnCiclo(p) = 0
+    Next p
+    
+    ' Parada de emergencia. Definir el límite máximo de iteraciones y el contador de iteraciones actuales.
+    Dim maxIteraciones As Long
+    maxIteraciones = 100 ' Número máximo de iteraciones permitido
+    Dim iteracionActual As Long
+    iteracionActual = 0
+    
+    'cantidad maxima de paquetes que puede tener un camion monoproducto optimo
+    Dim cantidadMaximaProducto(1 To 7) As Long
+    For p = 1 To 7
+        familiaActual = familias(1, p)
+        NmaxPaqFamilia = dictFamilias(familiaActual)(1)
+        cantidadMaximaProducto(p) = Int(Pmax / pesos(1, p))
+     Next p
+    
+    ' Nº de paquets de Peso de Camion Completo monoproducto
+    Dim CamionCompleto(1 To 1, 1 To 7) As Long, pesoCamCompleto(1 To 1, 1 To 7) As Double
+    For p = 1 To 7
+    If UCase(familias(1, p)) = "MALLA" Then
+        CamionCompleto(1, p) = Application.Min(Int(Altmax / alturas(1, p)) * 2, Int(Pmax / pesos(1, p)))
+    Else
+        CamionCompleto(1, p) = Int(Pmax / pesos(1, p))
+    End If
+    pesoCamCompleto(1, p) = CamionCompleto(1, p) * pesos(1, p)
+    'Debug.Print "(p= " & p & ", cantidadMaximaProducto " & cantidadMaximaProducto(p); ", pesoCamCompleto = " & pesoCamCompleto(1, p)
+    Next p
+    
+    ' Inicializar el contador de dias, camiones, ciclos
+    Dim cicloActual As Long
+    diaActual = 1
+    camionesHoy = 0
+    numCamion = 1
+    cicloActual = 1
+    cicloActualPrevio = 1 ' Inicializa con el mismo valor que cicloActual
+    fila = 30   ' fila inicio impresion en la hoja de resultados
+    
+    '*******************************************************************************************************************************************************
+    ' Bucle principal . Se ejecuta para cada nuevo camion.
+     '*******************************************************************************************************************************************************
+    Do
+        ' BORRAR. Salida de emergencia. Verificar si se ha alcanzado el límite máximo de iteraciones
+        iteracionActual = iteracionActual + 1
+        If iteracionActual > maxIteraciones Then
+            MsgBox "La macro se detuvo después de alcanzar el número máximo de iteraciones permitido."
+            Exit Do
+        End If
+        If Application.WorksheetFunction.Sum(cartera) <= 0 Then
+            MsgBox "Planificación completada: toda la cartera ha sido asignada.", vbInformation
+            Exit Do
+        End If
+        If numCamion > 100 Then
+            MsgBox "Proceso detenido: Se ha alcanzado el límite de 100 camiones.", vbExclamation
+            Exit Do
+        End If
+        
+        ' Inicialización de variables que dependen del camion y no de la combinacion
+        Dim ordenMenor As Long, cantCargablesPorOrden As Long, ordenpresente As Boolean
+        Dim cantCartera As Long, valCart As Long, valStock As Long, valCargablesCart As Long, valUrg As Long
+        Dim valUrgCargablesCart As Long, valnpaqOrden As Long, valCargablesOrden As Long
+        Dim valordenCarga As Long, valcamcompleto As Long, pesoarticulo As Double, CargablesParaCadaOrden As Variant
+        Dim valReservaCumplibleUrgentes As Long, lB_ordenesP As Long, uB_ordenesP As Long
+        Dim stock_despues_urg As Long, cartera_despues_urg As Long, cam_completo_despues_urg As Long
+        Dim Foundvalidcombinacion As Boolean
+        
+        cantCartera = 0
+        cantCargablesCartera = 0
+        numArtCargablesCartera = 0
+        cantUrgentesCartera = 0
+        cantUrgentesCargablesCartera = 0
+        nArtUrgCargablesCartera = 0
+        cantCargablesPorOrden = 0
+        nArtCargablesOrden = 0
+        numartNoCargadosenCiclo = 0
+        ordenMenor = 999
+        ordenpresente = False
+        ExisteOrdenCarga = False
+        maxUrgentes = 0
+        bestAlturaTotal = -1
+        bestFila = 0
+        minNart = numArticulos ' Un número alto para buscar el menor valor
+        maxPesoComb = 0
+        articulosNuevos = 0
+        articulosnuevosmejor = 0
+        puntajeMejor = -999999
+        ' Inicializar la mejor combinación, Pilas y Capas
+        Foundvalidcombinacion = False
+        ReDim bestCombinacion(0 To 6)
+        ReDim bestPila1(1 To 7)
+        ReDim bestPila2(1 To 7)
+        ReDim bestCapa1(1 To 7)
+        ReDim bestCapa2(1 To 7)
+        For p = 1 To 7
+            bestCombinacion(p - 1) = 0
+            bestPila1(p) = 0
+            bestPila2(p) = 0
+            bestCapa1(p) = 0
+            bestCapa2(p) = 0
+        Next p
+        
+        ' Validacion inicial de ordenesPrioritarias
+        On Error Resume Next
+        Dim tienePrioridadesValidas As Boolean
+        tienePrioridadesValidas = IsArray(ordenesPrioritarias) And _
+                                (UBound(ordenesPrioritarias) >= LBound(ordenesPrioritarias))
+        If Err.Number <> 0 Or Not tienePrioridadesValidas Then
+            On Error GoTo 0
+            ReDim ordenesPrioritarias(0)
+            ordenesPrioritarias(0) = 1 ' Prioridad por defecto
+            Err.Clear
+        End If
+        On Error GoTo 0
+
+    ' CALCULOS QUE NO DEPENDEN DE LA COMBINACION. TODOS LOS QUE DEPENDEN DE BESTCOMBINACION (CAMION CARGADO) SE ACTUALIZAN AL FINAL DEL DIA
+        
+        'CALCULOS .  PARTE 1. inicializaciones para Orden de carga
+        'Obtención de los límites de ordenes de carga Prioritarios
+        If IsArray(ordenesPrioritarias) And UBound(ordenesPrioritarias) >= LBound(ordenesPrioritarias) Then
+            lB_ordenesP = LBound(ordenesPrioritarias)
+            uB_ordenesP = UBound(ordenesPrioritarias)
+        Else
+            lB_ordenesP = 1
+            uB_ordenesP = 1
+            'Debug.Print "****** Dia = "; diaactual; " Advertencia: 'ordenesPrioritarias' no está definido o está vacío. Se usarán límites por defecto para la segunda dimensión de CargablesParaCadaOrden."
+        End If
+        'Inicializar CargablesParaCadaOrden a cero
+        Dim i_articulo As Integer, i_nivel As Integer
+        ReDim CargablesParaCadaOrden(1 To 7, lB_ordenesP To uB_ordenesP)
+        For i_articulo = 1 To 7
+            For i_nivel = lB_ordenesP To uB_ordenesP
+                CargablesParaCadaOrden(i_articulo, i_nivel) = 0
+            Next i_nivel
+        Next i_articulo
+
+        'CALCULOS .  PARTE 2. Variables temporales, Cartera y Urgentes
+        Dim noUrgentesCargables() As Long, valcamcomp, valNoUrgCargablesCart As Long, cantNoUrgCargables As Long, nArtNoUrgCargables As Integer
+        ReDim noUrgentesCargables(1 To numArticulos)
+        valCart = 0
+        cantCartera = 0
+        valStock = 0
+        valCargablesCart = 0
+        valUrgCargablesCart = 0
+        valNoUrgCargablesCart = 0
+        cantCargablesCartera = 0
+        numArtCargablesCartera = 0
+        valUrg = 0
+        cantUrgentesCartera = 0
+        cantUrgentesCargablesCartera = 0
+        nArtUrgCargablesCartera = 0
+        cantNoUrgCargables = 0
+        nArtNoUrgCargables = 0
+        valcamcomp = 0
+        
+        For p = 1 To 7
+        
+            valCart = cartera(1, p)
+            cantCartera = cantCartera + valCart
+            valStock = stockDisponible(1, p)
+            valcamcomp = CamionCompleto(1, p)
+            cargablesCartera(p) = Application.Min(valCart, valStock)  ' no esta filtrado por camion completo
+            valCargablesCart = cargablesCartera(p)
+            valUrg = UrgentesCartera(1, p)
+            urgentesCargablesCartera(p) = Application.Min(valUrg, valCargablesCart, valcamcomp)
+            valUrgCargablesCart = urgentesCargablesCartera(p)
+            noUrgentesCargables(p) = Application.Min(valcamcomp, valCargablesCart - valUrgCargablesCart)
+            valNoUrgCargablesCart = noUrgentesCargables(p)
+            If valCargablesCart > 0 Then
+                cantCargablesCartera = cantCargablesCartera + valCargablesCart
+                numArtCargablesCartera = numArtCargablesCartera + 1
+            End If
+            If valUrg > 0 Then
+                cantUrgentesCartera = cantUrgentesCartera + valUrg
+                'nArtUrgCartera = nArtUrgCartera + 1
+            End If
+            If valUrgCargablesCart > 0 Then
+                cantUrgentesCargablesCartera = cantUrgentesCargablesCartera + valUrgCargablesCart
+                nArtUrgCargablesCartera = nArtUrgCargablesCartera + 1
+            End If
+             If valNoUrgCargablesCart > 0 Then
+                cantNoUrgCargables = cantNoUrgCargables + valNoUrgCargablesCart
+                nArtNoUrgCargables = nArtNoUrgCargables + 1
+            End If
+            
+            ' resetear npaqmax a 0
+            npaqmax(p) = 0
+            
+            'articulos Autosuficientes para cargar sin ayuda de otros articulos de la combinacion (boliano)
+            'NO VALE CON CALCULARLO AQUI. LA MALLA NO ES AUTOSUCIFIENTE POR LA RELACION PESO/ALTURA. _
+            HAY QUE CALCULAR EL PESO DEL CAMION COMPLETO DE CADA ARTICULO
+            pesoarticulo = valCargablesCart * pesos(1, p)
+            esautosuficiente(p) = (pesoarticulo >= Pmin) And (valCargablesCart > 0)
+            '********** añadir aqui calculo de la altura monoproducto de camioncompleto(p) para comprobnar autosuficiencia
+        Next p
+        
+        ' CALCULOS PARTE 3. Fechas de carga. Determinar disponibilidad máxima según día actual por las posibles fechas de carga impuestas
+        '                   puede que no se haya cargado todo lo pedido en npaqfechaXcarga cuando se alcanza fecheX+1carga.
+        '                   npaqfechaXCarga(p) se ha inicializado antes de comenzar la carga de camiones y se actualiza despues de cargar cada camion.
+        cantCargableFecha1 = 0
+        cantCargableFecha2 = 0
+        cantCargableFecha3 = 0
+        For p = 1 To 7
+           npaqmax(p) = 0
+            If fecha1Carga(1, p) = 0 Or diaActual >= fecha1Carga(1, p) Then
+                npaqmax(p) = npaqmax(p) + npaqfecha1Carga(p) ' Suma los paquetes restantes de la Fecha1
+                cantCargableFecha1 = cantCargableFecha1 + npaqfecha1Carga(p)
+            End If
+
+            If fecha2Carga(1, p) = 0 Or diaActual >= fecha2Carga(1, p) Then
+                npaqmax(p) = npaqmax(p) + npaqfecha2Carga(p) ' Suma los paquetes restantes de la Fecha2
+                cantCargableFecha2 = cantCargableFecha2 + npaqfecha2Carga(p)
+            End If
+
+            If fecha3Carga(1, p) = 0 Or diaActual >= fecha3Carga(1, p) Then
+                npaqmax(p) = npaqmax(p) + npaqfecha3Carga(p) ' Suma los paquetes restantes de la Fecha3
+                cantCargableFecha3 = cantCargableFecha3 + npaqfecha3Carga(p)
+            End If
+            ' Asegurar que npaqmax(p) no exceda la cartera total restante del artículo
+            npaqmax(p) = Application.Min(npaqmax(p), cartera(1, p))
+        Next p
+        
+       ' If numCamion = 5 And mododebug Then
+        '    Debug.Print "DIA = "; diaActual; ", cam = "; numCamion
+         '   Debug.Print "npaqfecha1carga= ("; npaqfecha1Carga(1); ","; npaqfecha1Carga(2); ","; npaqfecha1Carga(3); ","; npaqfecha1Carga(4); ","; npaqfecha1Carga(5); ","; npaqfecha1Carga(6); ","; npaqfecha1Carga(7); ")"
+          '  Debug.Print "npaqfecha2carga= ("; npaqfecha2Carga(1); ","; npaqfecha2Carga(2); ","; npaqfecha2Carga(3); ","; npaqfecha2Carga(4); ","; npaqfecha2Carga(5); ","; npaqfecha2Carga(6); ","; npaqfecha2Carga(7); ")"
+           ' Debug.Print "maxfechacarga = "; maxfechacarga; ", npaqmax = ("; npaqmax(1); ","; npaqmax(2); ","; npaqmax(3); ","; npaqmax(4); ","; npaqmax(5); ","; npaqmax(6); ","; npaqmax(7); ")"
+            'Debug.Print ">>> cantCargableFecha1=" & cantCargableFecha1 & _
+            "  cantCargableFecha2=" & cantCargableFecha2 & _
+            "  cantCargableFecha3=" & cantCargableFecha3
+        'End If
+        
+        ' Generar solo las combinaciones válidas con los paquetes posibles de todos los artículos
+
+        ' CALCULOS PARTE 4. Calcular los indices maximos para cada articulo
+        Dim maxI As Long, maxJ As Long, maxK As Long, maxL As Long, maxM As Long, maxN As Long, maxO As Long, MaxX As Variant
+        ReDim MaxX(1 To 7)
+        maxI = Application.Min(cartera(1, 1), stockDisponible(1, 1), CamionCompleto(1, 1), npaqmax(1))
+        maxJ = Application.Min(cartera(1, 2), stockDisponible(1, 2), CamionCompleto(1, 2), npaqmax(2))
+        maxK = Application.Min(cartera(1, 3), stockDisponible(1, 3), CamionCompleto(1, 3), npaqmax(3))
+        maxL = Application.Min(cartera(1, 4), stockDisponible(1, 4), CamionCompleto(1, 4), npaqmax(4))
+        maxM = Application.Min(cartera(1, 5), stockDisponible(1, 5), CamionCompleto(1, 5), npaqmax(5))
+        maxN = Application.Min(cartera(1, 6), stockDisponible(1, 6), CamionCompleto(1, 6), npaqmax(6))
+        maxO = Application.Min(cartera(1, 7), stockDisponible(1, 7), CamionCompleto(1, 7), npaqmax(7))
+        MaxX(1) = maxI
+        MaxX(2) = maxJ
+        MaxX(3) = maxK
+        MaxX(4) = maxL
+        MaxX(5) = maxM
+        MaxX(6) = maxN
+        MaxX(7) = maxO
+        
+        Dim TmMaxX(1 To 7) As Variant, TmMaxTot As Double
+        TmMaxTot = 0
+        For p = 1 To numArticulos
+            TmMaxX(p) = Round(MaxX(p) * pesos(1, p), 2)
+            TmMaxTot = TmMaxTot + TmMaxX(p)
+        Next p
+        
+        ' CALCULOS PARTE 5. Incumplible urgentes.
+        'Comprobar si será posible cumplir con las urgencias en este camion
+        ' Reinicialización antes de llamar a CumplibleUrgentes
+        Dim ReservaCumplibleUrgentes As Variant, gradoCumplibleUrgentes As Long
+        ReDim ReservaCumplibleUrgentes(1 To numArticulos)
+        
+        ' **Limpieza explícita para evitar residuos de camiones anteriores**
+        For p = 1 To numArticulos
+            ReservaCumplibleUrgentes(p) = 0
+        Next p
+        gradoCumplibleUrgentes = CumplibleUrgentes( _
+                            numCamion, numArticulos, pesos, alturas, familias, _
+                            MaxPaqCap, dict, _
+                            combinacionesPermitidas, urgentesCargablesCartera, _
+                            cantUrgentesCargablesCartera, noUrgentesCargables, _
+                            ordencarga, Pmin, Pmax, Altmax, MaxX, ReservaCumplibleUrgentes)
+        
+        
+        ' CALCULOS PARTE 6. cumplibleorden. Ahora que se conocen ReservaCumplibleUrgentes reservado por cumplibleUrgentes, _
+                            puedo actualizar los parametros del Orden de Carga
+        ' calcular las variables del orden de carga
+        Dim prioridadActualDelArticulo As Long, dictPrioridades As Object
+        Set dictPrioridades = CreateObject("Scripting.Dictionary")
+        For p = 1 To 7
+            If ordencarga(1, p) > 0 And npaqOrdenCarga(1, p) > 0 Then
+                dictPrioridades(CLng(ordencarga(1, p))) = 1 ' Usamos CLng para asegurar tipo de dato consistente
+            End If
+        Next p
+        ' Si no hay órdenes activas, puedes decidir si quieres que ordenesPrioritarias sea vacío o tenga un valor por defecto
+        If dictPrioridades.Count = 0 Then
+            ' Por ejemplo, redimensionar a un array vacío o a un valor por defecto si es necesario para lB/uB
+            ReDim ordenesPrioritarias(0) ' O ReDim ordenesPrioritarias(0 to -1) para un array vacío real
+            ' ordenesPrioritarias(0) = 999 ' Una prioridad muy baja o un indicador de "ninguna prioridad"
+            'Debug.Print "**********************  dia = "; diaActual; ", camion = "; numcamion; " . No hay órdenes de carga activas."
+        Else
+            Dim prioridadesActivas() As Variant
+            prioridadesActivas = dictPrioridades.keys()
+            Call OrdenarPrioridades(prioridadesActivas)
+            ' Asignar a ordenesPrioritarias global/de módulo
+            ReDim ordenesPrioritarias(LBound(prioridadesActivas) To UBound(prioridadesActivas))
+            For i = LBound(prioridadesActivas) To UBound(prioridadesActivas)
+                ordenesPrioritarias(i) = prioridadesActivas(i)
+            Next i
+        End If
+    
+        ' Volver a determinar los límites de prioridades ahora que ordenesPrioritarias está (re)definido
+        If IsArray(ordenesPrioritarias) And UBound(ordenesPrioritarias) >= LBound(ordenesPrioritarias) Then
+            lB_ordenesP = LBound(ordenesPrioritarias)
+            uB_ordenesP = UBound(ordenesPrioritarias)
+        Else
+            lB_ordenesP = 0 ' O 1 si LBound siempre es 1
+            uB_ordenesP = -1 ' Array vacío
+        End If
+    
+        ' Inicializar CargablesParaCadaOrden a cero (volver a dimensionar si las prioridades cambiaron)
+        Dim encontradoNivel As Boolean
+        ReDim CargablesParaCadaOrden(1 To 7, lB_ordenesP To uB_ordenesP) ' Asegura que las dimensiones de la segunda parte son correctas
+    
+        ' Ahora, calcular los cargables para cada orden, restando las reservas para urgencias
+        Dim PminOrden As Double, noOrdenCargables As Variant
+        
+        For p = LBound(ordencarga, 2) To UBound(ordencarga, 2)
+            valordenCarga = ordencarga(1, p)
+            valnpaqOrden = npaqOrdenCarga(1, p)
+            'If valordenCarga > 0 And valnpaqOrden > 0 Then ' Solo procesar si hay orden activa con cantidad > 0
+            If p <= UBound(ReservaCumplibleUrgentes) Then
+                valReservaCumplibleUrgentes = ReservaCumplibleUrgentes(p)
+            Else
+                valReservaCumplibleUrgentes = 0
+            End If
+            valCart = cartera(1, p)
+            valStock = stockDisponible(1, p)
+            valcamcompleto = CamionCompleto(1, p)
+            stock_despues_urg = Application.Max(0, valStock - valReservaCumplibleUrgentes * 0)
+            cartera_despues_urg = Application.Max(0, valCart - valReservaCumplibleUrgentes * 0)
+            cam_completo_despues_urg = Application.Max(0, valcamcompleto - valReservaCumplibleUrgentes * 0)
+            CargablesPorOrden(p) = Application.Min(valnpaqOrden, stock_despues_urg, _
+                                                    cartera_despues_urg, cam_completo_despues_urg)
+            'If diaactual <= 4 Then Debug.Print "dia = "; diaactual; ", valnpaqorden= "; valnpaqOrden; ", stock_despues_urg="; stock_despues_urg; ", cartera_despues_urg="; cartera_despues_urg; ", cam_completo_despues_urg ="; cam_completo_despues_urg; "cargablespororden = (" & cargablesPorOrden(1) & ", " & cargablesPorOrden(2) & ", " _
+                            & cargablesPorOrden(3) & ", " & cargablesPorOrden(4) & ", " & cargablesPorOrden(5) & ", " & cargablesPorOrden(6) & ", " & cargablesPorOrden(7) & ")"
+            valCargablesOrden = CargablesPorOrden(p)
+            prioridadActualDelArticulo = valordenCarga
+            encontradoNivel = False
+            For i_nivel = lB_ordenesP To uB_ordenesP
+                If ordenesPrioritarias(i_nivel) = prioridadActualDelArticulo Then
+                    CargablesParaCadaOrden(p, i_nivel) = CargablesPorOrden(p)
+                    encontradoNivel = True
+                    Exit For
+                End If
+            Next i_nivel
+    
+            If valnpaqOrden > 0 Then
+                cantCargablesPorOrden = cantCargablesPorOrden + valCargablesOrden
+                nArtCargablesOrden = nArtCargablesOrden + 1
+                If valordenCarga < ordenMenor Then
+                    ordenMenor = valordenCarga
+                    ordenpresente = True
+                End If
+            End If
+            'End If
+        Next p
+        ExisteOrdenCarga = (ordenMenor < 999)
+        
+        ' Comprobar si será posible cumplir con el orden en este camion
+        Dim gradoCumplibleOrden As Long
+        Dim ReservaCumplibleOrden As Variant
+        ReDim ReservaCumplibleOrden(1 To 7)
+         ' **Limpieza explícita para evitar residuos de camiones anteriores**
+        For p = 1 To numArticulos
+            ReservaCumplibleOrden(p) = 0
+        Next p
+        gradoCumplibleOrden = CumplibleOrden( _
+                                numCamion, ordencarga, CargablesPorOrden, _
+                                MaxX, pesos, alturas, _
+                                familias, dict, combinacionesPermitidas, _
+                                MaxPaqCap, _
+                                Pmin, Pmax, Altmax, _
+                                numArticulos)
+                                            
+        ' CALCULOS PARTE 7. Calcular alternanciaIncumplible para el camión ACTUAL
+        Dim gradoCumplibleAlternancia, valCarteraDespuesReservas As Long, valStockDisponibleDespuesReservas As Long, valCantCamCompletoDespuesReservas As Long
+        Dim cargablesPorAlternancia As Variant
+        Dim cantCargablesPorAlternancia As Long
+        ReDim cargablesPorAlternancia(1 To numArticulos)
+        cantCargablesPorAlternancia = 0
+        numartCargadosenCiclo = 0
+
+        ' Primer bucle: Sirve para calcular 'cargablesPorAlternancia' y otras variables
+        For p = 1 To numArticulos
+            ' Un artículo es cargable por alternancia si cumple los 4 requisitos
+            ' Asumimos que ReservaCumplibleUrgentes ya está calculado
+            valCarteraDespuesReservas = Application.Max(0, cartera(1, p)) ' Simplificado, ya que la reserva es 0
+            valStockDisponibleDespuesReservas = Application.Max(0, stockDisponible(1, p))
+            valCantCamCompletoDespuesReservas = Application.Max(0, CamionCompleto(1, p))
+
+            If articulosCargadosEnCiclo(p) > 0 Then numartCargadosenCiclo = numartCargadosenCiclo + 1
+            
+            ' EsarticuloCargableEnCiclo(p) se puede simplificar
+            Dim esCargableEsteCiclo As Boolean
+            esCargableEsteCiclo = (valCarteraDespuesReservas > 0 And valStockDisponibleDespuesReservas > 0)
+
+            If alternanciaArticulos(p) = "SI" And esCargableEsteCiclo And articulosCargadosEnCiclo(p) = 0 Then
+                cargablesPorAlternancia(p) = Application.Min(valCarteraDespuesReservas, valStockDisponibleDespuesReservas, valCantCamCompletoDespuesReservas)
+                cantCargablesPorAlternancia = cantCargablesPorAlternancia + cargablesPorAlternancia(p)
+            Else
+                cargablesPorAlternancia(p) = 0
+            End If
+        Next p
+
+        necesitaAlternancia = False ' Se inicializa a Falso UNA SOLA VEZ, antes del bucle
+        For p = 1 To numArticulos
+            ' Verificamos si CUALQUIER artículo cargable necesita alternancia
+            If alternanciaArticulos(p) = "SI" And _
+               cartera(1, p) > 0 And _
+               stockDisponible(1, p) > 0 And _
+               articulosCargadosEnCiclo(p) = 0 Then
+               
+                necesitaAlternancia = True ' Si encontramos UNO, es suficiente
+                Exit For ' Salimos del bucle para ser más eficientes
+            End If
+        Next p
+        
+        If numCamion = 2 Then
+               Debug.Print "Camion = "; numCamion; ", CargablesPorAlternancia = (" & cargablesPorAlternancia(1) & ", " & cargablesPorAlternancia(2) _
+                        & ", " & cargablesPorAlternancia(3) & ", " & cargablesPorAlternancia(4) & ", " & cargablesPorAlternancia(5) & ", " & _
+                        cargablesPorAlternancia(6) & ", " & cargablesPorAlternancia(7) & "), cant = " & cantCargablesPorAlternancia
+                Debug.Print "articulosCargadosEnCiclo antes de llamar a cumpliblealternacia = (" & _
+                       articulosCargadosEnCiclo(1) & ", " & articulosCargadosEnCiclo(2) & ", " _
+                       & articulosCargadosEnCiclo(3) & ", " & articulosCargadosEnCiclo(4) & ", " & _
+                        articulosCargadosEnCiclo(5) & ", " & articulosCargadosEnCiclo(6) & ", " & _
+                       articulosCargadosEnCiclo(7) & ")"
+        End If
+
+        ' Comprobar si será posible cumplir con la alternancia en este camion
+        gradoCumplibleAlternancia = CumplibleAlternancia( _
+                                        numCamion, Pmin, Pmax, Altmax, _
+                                        pesos, alturas, alternanciaArticulos, _
+                                        cargablesPorAlternancia, cantCargablesPorAlternancia, MaxX, _
+                                        familias, dict, combinacionesPermitidas, _
+                                        MaxPaqCap)
+                                        
+        ' comprobar si es necesario forzar un cambio de ciclo.
+        Dim necesitaAlternanciaInicial As Boolean, gradoCumplibleAlternanciainicial As Long
+        ' guardamos el flag original para detectar el caso
+        necesitaAlternanciaInicial = necesitaAlternancia
+        gradoCumplibleAlternanciainicial = gradoCumplibleAlternancia
+        If numCamion = 2 Then Debug.Print "Dia = " & diaActual & ".Camion ="; numCamion; ", gradocumplibleurgentes= "; gradoCumplibleUrgentes; _
+            ", gradocumplibleorden = "; gradoCumplibleOrden; _
+            ", gradoCumplibleAlternancia 1ª pasada = "; gradoCumplibleAlternanciainicial; ", necesita alternancia inicial = "; necesitaAlternanciaInicial
+        ' 2) Si grado = –1 pero había alternancia pendiente originalmente...
+        If gradoCumplibleAlternancia = -1 And necesitaAlternanciaInicial Then
+            Debug.Print "Dia = " & diaActual & ".Camion ="; numCamion; ". FORZADO CAMBIO CICLO: gradocumplibleurgentes= "; gradoCumplibleUrgentes; _
+            ", gradocumplibleorden = "; gradoCumplibleOrden; _
+            ", gradoCumplibleAlternancia 1ª pasada = "; gradoCumplibleAlternanciainicial
+            Debug.Print " CargablesPorAlternancia 1ª pasada = (" & cargablesPorAlternancia(1) & ", " & cargablesPorAlternancia(2) & ", " _
+                    & cargablesPorAlternancia(3) & ", " & cargablesPorAlternancia(4) & ", " & cargablesPorAlternancia(5) & ", " & cargablesPorAlternancia(6) & ", " & _
+                    cargablesPorAlternancia(7) & "), cant = " & cantCargablesPorAlternancia
+
+            ' FORZAMOS CAMBIO DE CICLO:
+            '    a) reiniciamos articulosCargadosEnCiclo.
+            '    b) incrementamos el contador de ciclo/día
+            For p = LBound(articulosCargadosEnCiclo) To UBound(articulosCargadosEnCiclo)
+                articulosCargadosEnCiclo(p) = 0
+            Next p
+            cicloActual = cicloActual + 1
+            necesitaAlternancia = False
+            ' recalcula todas lasvariables de alternancia
+                    cantCargablesPorAlternancia = 0
+            For p = 1 To numArticulos
+                ' Un artículo es cargable por alternancia si cumple los 4 requisitos
+                valCarteraDespuesReservas = Application.Max(0, cartera(1, p) - ReservaCumplibleUrgentes(p) * 0 - ReservaCumplibleOrden(p) * 0)
+                valStockDisponibleDespuesReservas = Application.Max(0, stockDisponible(1, p) - ReservaCumplibleUrgentes(p) * 0 - ReservaCumplibleOrden(p) * 0)
+                valCantCamCompletoDespuesReservas = Application.Max(0, CamionCompleto(1, p) - ReservaCumplibleUrgentes(p) * 0 - ReservaCumplibleOrden(p) * 0)
+                If alternanciaArticulos(p) = "SI" And valCarteraDespuesReservas > 0 And _
+                   valStockDisponibleDespuesReservas > 0 And articulosCargadosEnCiclo(p) = 0 Then
+                    cargablesPorAlternancia(p) = Application.Min(valCarteraDespuesReservas, valStockDisponibleDespuesReservas, valCantCamCompletoDespuesReservas)
+                    cantCargablesPorAlternancia = cantCargablesPorAlternancia + cargablesPorAlternancia(p)
+                Else
+                    cargablesPorAlternancia(p) = 0
+                End If
+            Next p
+        
+            'If diaActual < 5 Then Debug.Print "Camion ="; numCamion; ", articulosCargadosEnCiclo antes de llamar a esalternaciacumplible = (" & articulosCargadosEnCiclo(1) & ", " & articulosCargadosEnCiclo(2) & ", " _
+            & articulosCargadosEnCiclo(3) & ", " & articulosCargadosEnCiclo(4) & ", " & articulosCargadosEnCiclo(5) & ", " & articulosCargadosEnCiclo(6) & ", " & articulosCargadosEnCiclo(7) & ")"
+            
+            gradoCumplibleAlternancia = CumplibleAlternancia( _
+                                        numCamion, Pmin, Pmax, Altmax, _
+                                        pesos, alturas, alternanciaArticulos, _
+                                        cargablesPorAlternancia, cantCargablesPorAlternancia, MaxX, _
+                                        familias, dict, combinacionesPermitidas, _
+                                        MaxPaqCap)
+        End If
+        'Debug.Print "Dia = " & diaactual & " gradocumplibleurgentes= "; gradoCumplibleUrgentes; _
+            ", gradocumplibleorden = "; gradoCumplibleOrden; _
+            ", gradoCumplibleAlternancia (Global) = "; gradoCumplibleAlternancia
+        
+        Debug.Print "DIA=" & diaActual & ",CAM:" & numCamion & ". GENERAR NUEVA COMBINACION"
+        Debug.Print "                    Pmin = " & Pmin & ", Pmax = " & Pmax & ", Altmax = " & Altmax
+        Debug.Print "                Familias = (" & familias(1, 1) & ", " & familias(1, 2) & ", " _
+        & familias(1, 3) & ", " & familias(1, 4) & ", " & familias(1, 5) & ", " & familias(1, 6) & ", " & familias(1, 7) & ")"
+        Debug.Print "             Alternancia = (" & alternanciaArticulos(1) & ", " & alternanciaArticulos(2) & ", " _
+        & alternanciaArticulos(3) & ", " & alternanciaArticulos(4) & ", " & alternanciaArticulos(5) & ", " & alternanciaArticulos(6) & ", " & alternanciaArticulos(7) & ")"
+        Debug.Print "                   Pesos = (" & pesos(1, 1) & "; " & pesos(1, 2) & "; " _
+        & pesos(1, 3) & "; " & pesos(1, 4) & "; " & pesos(1, 5) & "; " & pesos(1, 6) & "; " & pesos(1, 7) & ")"
+        Debug.Print "                 Alturas = (" & alturas(1, 1) & "; " & alturas(1, 2) & "; " _
+        & alturas(1, 3) & "; " & alturas(1, 4) & "; " & alturas(1, 5) & "; " & alturas(1, 6) & "; " & alturas(1, 7) & ")"
+        Debug.Print "                  Lcorto = (" & lcorto(1, 1) & ", " & lcorto(1, 2) & ", " _
+        & lcorto(1, 3) & ", " & lcorto(1, 4) & ", " & lcorto(1, 5) & ", " & lcorto(1, 6) & ", " & lcorto(1, 7) & ")"
+        Debug.Print "               MaxPaqCap = (" & MaxPaqCap(1) & ", " & MaxPaqCap(2) & ", " _
+        & MaxPaqCap(3) & ", " & MaxPaqCap(4) & ", " & MaxPaqCap(5) & ", " & MaxPaqCap(6) & ", " & MaxPaqCap(7) & ")"
+        Debug.Print "                 npaqmax = ("; npaqmax(1) & ", "; npaqmax(2) & ", "; npaqmax(3) & ", "; npaqmax(4) & ", "; npaqmax(5) & ", "; npaqmax(6) & ", "; npaqmax(7) & ")"
+        Debug.Print "      cantcargablefecha1 = "; cantCargableFecha1 & ", cantcargablefecha2  = "; cantCargableFecha2 & ", cantcargablefecha3 = "; cantCargableFecha3
+        Debug.Print "                  TmMaxX = ("; TmMaxX(1) & ", "; TmMaxX(2) & ", "; TmMaxX(3) & ", "; TmMaxX(4) & ", "; TmMaxX(5) & ", "; TmMaxX(6) & ", "; TmMaxX(7) & "), Total = "; TmMaxTot
+        Debug.Print "                    MaxX = ("; maxI & ", "; maxJ & ", "; maxK & ", "; maxL & ", "; maxM & ", "; maxN & ", "; maxO & "),"
+        Debug.Print "                 Cartera = (" & cartera(1, 1) & ", " & cartera(1, 2) & ", " _
+        & cartera(1, 3) & ", " & cartera(1, 4) & ", " & cartera(1, 5) & ", " & cartera(1, 6) & ", " & cartera(1, 7) & ")"
+        Debug.Print "         Stockdisponible = (" & stockDisponible(1, 1) & ", " & stockDisponible(1, 2) & ", " _
+        & stockDisponible(1, 3) & ", " & stockDisponible(1, 4) & ", " & stockDisponible(1, 5) & ", " & stockDisponible(1, 6) & ", " & stockDisponible(1, 7) & ")"
+        Debug.Print "        CargablesCartera = (" & cargablesCartera(1) & ", " & cargablesCartera(2) & ", " _
+        & cargablesCartera(3) & ", " & cargablesCartera(4) & ", " & cargablesCartera(5) & ", " & cargablesCartera(6) & ", " & cargablesCartera(7) & "), cant = " & cantCargablesCartera
+        Debug.Print "         Urgentescartera = (" & UrgentesCartera(1, 1) & ", " & UrgentesCartera(1, 2) & ", " _
+        & UrgentesCartera(1, 3) & ", " & UrgentesCartera(1, 4) & ", " & UrgentesCartera(1, 5) & ", " & UrgentesCartera(1, 6) & ", " & UrgentesCartera(1, 7) & "), cant = " & cantUrgentesCartera
+        Debug.Print "       Urgentescargables = ("; urgentesCargablesCartera(1) & ", "; urgentesCargablesCartera(2) & ", " _
+        ; urgentesCargablesCartera(3) & ", "; urgentesCargablesCartera(4) & ", "; urgentesCargablesCartera(5) & ", "; urgentesCargablesCartera(6) & ", "; urgentesCargablesCartera(7) & "), cant = " & cantUrgentesCargablesCartera
+        Debug.Print "              Ordencarga = (" & ordencarga(1, 1) & ", " & ordencarga(1, 2) & ", " _
+        & ordencarga(1, 3) & ", " & ordencarga(1, 4) & ", " & ordencarga(1, 5) & ", " & ordencarga(1, 6) & ", " & ordencarga(1, 7) & ")"
+        Debug.Print "          NPaqOrdencarga = (" & npaqOrdenCarga(1, 1) & ", " & npaqOrdenCarga(1, 2) & ", " _
+        & npaqOrdenCarga(1, 3) & ", " & npaqOrdenCarga(1, 4) & ", " & npaqOrdenCarga(1, 5) & ", " & npaqOrdenCarga(1, 6) & ", " & npaqOrdenCarga(1, 7) & ")"
+        Debug.Print "       CargablesPorOrden = (" & CargablesPorOrden(1) & ", " & CargablesPorOrden(2) & ", " _
+        & CargablesPorOrden(3) & ", " & CargablesPorOrden(4) & ", " & CargablesPorOrden(5) & ", " & CargablesPorOrden(6) & ", " & CargablesPorOrden(7) & "), cant = " & cantCargablesPorOrden
+        Debug.Print " CargablesPorAlternancia = (" & cargablesPorAlternancia(1) & ", " & cargablesPorAlternancia(2) & ", " _
+        & cargablesPorAlternancia(3) & ", " & cargablesPorAlternancia(4) & ", " & cargablesPorAlternancia(5) & ", " & cargablesPorAlternancia(6) & ", " & cargablesPorAlternancia(7) & "), cant = " & cantCargablesPorAlternancia
+        Debug.Print "articulosCargadosEnCiclo = (" & articulosCargadosEnCiclo(1) & ", " & articulosCargadosEnCiclo(2) & ", " _
+        & articulosCargadosEnCiclo(3) & ", " & articulosCargadosEnCiclo(4) & ", " & articulosCargadosEnCiclo(5) & ", " & articulosCargadosEnCiclo(6) & ", " & articulosCargadosEnCiclo(7) & ")"
+        Debug.Print "         CamionCompleto = (" & CamionCompleto(1, 1) & ", " & CamionCompleto(1, 2) & ", " _
+        & CamionCompleto(1, 3) & ", " & CamionCompleto(1, 4) & ", " & CamionCompleto(1, 5) & ", " & CamionCompleto(1, 6) & ", " & CamionCompleto(1, 7) & ")"
+        'Debug.Print "ReservaCumplibleUrgentes = (" & ReservaCumplibleUrgentes(1) & ", " & ReservaCumplibleUrgentes(2) & ", " _
+        '& ReservaCumplibleUrgentes(3) & ", " & ReservaCumplibleUrgentes(4) & ", " & ReservaCumplibleUrgentes(5) & ", " & ReservaCumplibleUrgentes(6) & ", " & ReservaCumplibleUrgentes(7) & ")"
+        'Debug.Print "   ReservaCumplibleOrden = (" & ReservaCumplibleOrden(1) & ", " & ReservaCumplibleOrden(2) & ", " _
+        '& ReservaCumplibleOrden(3) & ", " & ReservaCumplibleOrden(4) & ", " & ReservaCumplibleOrden(5) & ", " & ReservaCumplibleOrden(6) & ", " & ReservaCumplibleOrden(7) & ")"
+        Debug.Print "       cumplibleUrgentes = "; gradoCumplibleUrgentes; ", cumplibleOrden = "; gradoCumplibleOrden; ", cumplibleAlternancia = "; gradoCumplibleAlternancia
+        
+        ' GENERACION DE COMBINACIONES
+        For i = 0 To maxI
+            Dim pesoI As Double: pesoI = 0 + i * pesos(1, 1)
+            For j = 0 To maxJ
+                Dim pesoJ As Double: pesoJ = pesoI + j * pesos(1, 2)
+                For k = 0 To maxK
+                    Dim pesoK As Double: pesoK = pesoJ + k * pesos(1, 3)
+                    For L = 0 To maxL
+                        Dim pesoL As Double: pesoL = pesoK + L * pesos(1, 4)
+                        For m = 0 To maxM
+                            Dim pesoM As Double: pesoM = pesoL + m * pesos(1, 5)
+                            For n = 0 To maxN
+                                Dim pesoN As Double: pesoN = pesoM + n * pesos(1, 6)
+                                For o = 0 To maxO
+                                    Dim pesoO As Double: pesoO = pesoN + o * pesos(1, 7)
+                                    
+                                    ' Verificación de peso
+                                   If pesoO > Pmax Then Exit For
+                                    If pesoO >= Pmin Then
+                                      ' If i + q + k + l + m + n + o > 0 Then
+                                        pesocomb = pesoO
+                                        combinacion = Array(i, j, k, L, m, n, o)
+                                        puntaje = 0 ' Reiniciar puntaje en cada iteración
+                                        
+                                        validCombinacion = True
+                                        necesitaAlternancia = False
+                                        
+                                        'If numcamion= 15 And mododebug And combinacion(0) >= 6 Then
+                                        '    Debug.Print "Dia = "; diaActual & ". Combinacion = ("; Join(combinacion, ", ") & "). Entra en verificaciones *************************************************************"
+                                        'End If
+                                        ' Construir familiasPresentes —
+                                        Dim familiasPresentes As New Collection, idx As Integer
+                                        For idx = 0 To 6
+                                          If combinacion(idx) > 0 Then
+                                            On Error Resume Next
+                                              familiasPresentes.Add familias(1, idx + 1), CStr(familias(1, idx + 1))
+                                            On Error GoTo 0
+                                          End If
+                                        Next
+                                        
+                                        ' Detectar si es mixto —
+                                        Dim esMixto As Boolean
+                                        esMixto = (familiasPresentes.Count > 1)
+                                        
+                                        ' Calcular NminPaq, NmaxPaq, MaxPaqCapa y alternancia
+                                        Dim claveFam    As String
+                                        Dim paramsFam   As Variant   ' (= dictFamilias(claveFam))
+                                        Dim NminPaq     As Long
+                                        Dim NmaxPaq     As Long
+                                        Dim MaxPaqCapa  As Long
+                                        Dim altSI       As Boolean
+                                        
+                                        If esMixto Then
+                                          claveFam = "Mixto"
+                                        Else
+                                          claveFam = familiasPresentes(1)
+                                        End If
+                                        
+                                        paramsFam = dictFamilias(claveFam)
+                                        NminPaq = CLng(paramsFam(0))
+                                        NmaxPaq = CLng(paramsFam(1))
+                                        altSI = (UCase(paramsFam(4)) = "SI")
+                                        
+                                        ' Si la pila “corta” aplica, uso el cap. corto; si no, el genérico
+                                        If altSI Then
+                                          MaxPaqCapa = CLng(paramsFam(3))
+                                        Else
+                                          MaxPaqCapa = CLng(paramsFam(2))
+                                        End If
+                                        
+                                        'If numcamion= 15 And combinacion(0) = 7Then Debug.Print "dia= "; diaActual & "combinacion = (" & Join(combinacion, ", ") & "), NminPaq ="; NminPaq & ", NmaxPaq ="; NmaxPaq
+                                             
+                                        ' Verificar si la combinación de familias es permitida
+                                        Dim combTieneFamCompatibles  As Boolean
+                                        combTieneFamCompatibles = True
+                                        ' Verificar compatibilidad solo si es mixto
+                                        Dim posFila As Integer, posColumna As Integer
+                                        If familiasPresentes.Count > 1 Then
+                                            For p = 0 To 6
+                                                For q = 0 To 6
+                                                    If combinacion(p) > 0 And combinacion(q) > 0 Then
+                                                        Dim familiaP As String: familiaP = familias(1, p + 1)
+                                                        Dim familiaQ As String: familiaQ = familias(1, q + 1)
+                                                        posFila = dict(familiaP)
+                                                        posColumna = dict(familiaQ)
+                                                        If combinacionesPermitidas(posFila, posColumna) = 0 Then
+                                                            validCombinacion = False
+                                                            Exit For
+                                                        End If
+                                                    End If
+                                                Next q
+                                                If Not validCombinacion Then
+                                                    Exit For
+                                                End If
+                                            Next p
+                                        End If
+                                        If Not validCombinacion Then
+                                             'If numcamion= 15 And mododebug And combinacion(0) >= 6 Then _
+                                                Debug.Print "salida familias no compatibles"
+                                            GoTo NextCombinacion
+                                        End If
+                                                                                
+                                        ' Combinacion Válida salvo altura. Calcular  la altura total
+                                        alturaTotal = 0  ' de la combinación= camión
+                                        Dim pila1Altura As Double
+                                        Dim pila2Altura As Double
+                                        Dim totalMalla As Long
+                                        Dim pila1Paquetes As Long
+                                        Dim pila2Paquetes As Long
+                                        Dim capa1Paquetes As Long
+                                        Dim capa2Paquetes As Long
+                                        Dim capa1Altura As Double
+                                        Dim capa2Altura As Double
+                                        ReDim Pila1(1 To 7)
+                                        ReDim Pila2(1 To 7)
+                                        ReDim Capa1(1 To 7)
+                                        ReDim Capa2(1 To 7)
+            
+                                        ' Inicializar variables
+                                        pila1Paquetes = 0
+                                        pila2Paquetes = 0
+                                        pila1Altura = 0
+                                        pila2Altura = 0
+                                        capa1Paquetes = 0
+                                        capa2Paquetes = 0
+                                        capa1Altura = 0
+                                        capa2Altura = 0
+                                        alturaTotal = 0
+                                            
+                                        ' Verificar si la combinación tiene artículos de Malla
+                                        Dim tieneMallaComb As Boolean
+                                        tieneMallaComb = False
+                                        For p = 0 To 6
+                                            If familias(1, p + 1) = "MALLA" And cartera(1, p + 1) > 0 And stockDisponible(1, p + 1) > 0 Then
+                                                tieneMallaComb = True
+                                                Exit For
+                                            End If
+                                        Next p
+                                        
+                                        If tieneMallaComb Then  ' Recopilar alturas y cantidades de los artículos de Malla que tienen cartera y Stock disponible
+                                            ' Calcular el número de artículos de Malla (numArtMallaCargables)
+                                            Dim numArtMallaCargables As Long
+                                            numArtMallaCargables = 0
+                                            For p = 0 To 6
+                                                If familias(1, p + 1) = "MALLA" And cartera(1, p + 1) > 0 And stockDisponible(1, p + 1) > 0 Then
+                                                    numArtMallaCargables = numArtMallaCargables + 1
+                                                End If
+                                            Next p
+                                            
+                                            ' Redimensionar las matrices para almacenar alturas y cantidades de Malla
+                                            Dim alturasMalla As Variant
+                                            Dim cantidadesMalla As Variant
+                                            ReDim alturasMalla(0 To numArtMallaCargables - 1)
+                                            ReDim cantidadesMalla(0 To numArtMallaCargables - 1)
+                                        
+                                            ' Llenar las matrices con los datos de Malla
+                                            totalMalla = 0
+                                            For p = 0 To 6
+                                                If familias(1, p + 1) = "MALLA" And cartera(1, p + 1) > 0 And stockDisponible(1, p + 1) > 0 Then
+                                                    alturasMalla(totalMalla) = alturas(1, p + 1)
+                                                    cantidadesMalla(totalMalla) = Application.Min(cartera(1, p + 1), stockDisponible(1, p + 1), combinacion(p))
+                                                    totalMalla = totalMalla + 1
+                                                End If
+                                            Next p
+                                        
+                                            ' Distribuir los paquetes de Malla entre las dos pilas
+                                            Dim resultadoPilas As Variant
+                                            If totalMalla > 0 Then
+                                                resultadoPilas = DistribuirMallaOptima(combinacion, alturasMalla, cantidadesMalla)
+                                                pila1Altura = resultadoPilas(1)
+                                                pila2Altura = resultadoPilas(2)
+                                                pila1Paquetes = resultadoPilas(3)
+                                                pila2Paquetes = resultadoPilas(4)
+                                                If combinacion(3) = 22 _
+                                                    And combinacion(4) = 0 And combinacion(5) = 0 And combinacion(6) = 0 Then
+                                                    Debug.Print "combinacion: (" & Join(combinacion, ", ") & "), alturasMalla: (" & Join(alturasMalla, ", ") & "), cantidadesMalla: (" _
+                                                    & Join(cantidadesMalla, ", ") & ")"
+                                                    Debug.Print " pila1Altura ="; pila1Altura; ", pila2Altura = "; pila2Altura
+                                                End If
+                                            Else
+                                                ' Si no hay artículos de "MALLA" con cartera y Stock disponible, las pilas están vacías
+                                                pila1Altura = 0
+                                                pila2Altura = 0
+                                                pila1Paquetes = 0
+                                                pila2Paquetes = 0
+                                            End If
+                                        Else
+                                            ' Si no hay artículos de "MALLA" en la combinación, las pilas están vacías
+                                            pila1Altura = 0
+                                            pila2Altura = 0
+                                            pila1Paquetes = 0
+                                            pila2Paquetes = 0
+                                        End If
+                                        
+                                        ' Calcular el total de paquetes y su altura en Capa1 y Capa2
+                                        capa1Altura = 0
+                                        capa2Altura = 0
+                                        Dim numpaquetes As Variant
+                                        ReDim numpaquetes(1 To 7)
+                                        For p = 0 To 6
+                                            numpaquetes(p + 1) = combinacion(p)
+                                            If numpaquetes(p + 1) > 0 Then
+                                                If familias(1, p + 1) <> "MALLA" Then
+                                                    ' Distribuir los paquetes de No Malla entre las dos capas
+                                                    If capa1Paquetes <= MaxPaqCapa Then
+                                                        Capa1(p + 1) = Application.Min(MaxPaqCapa - capa1Paquetes, combinacion(p))
+                                                        capa1Paquetes = capa1Paquetes + Capa1(p + 1)
+                                                        ' Actualizar la altura de Capa 1
+                                                        If Capa1(p + 1) > 0 Then
+                                                            capa1Altura = Application.Max(capa1Altura, alturas(1, p + 1))
+                                                        End If
+                                                    End If
+                                                   ' Distribuir en Capa 2
+                                                    Capa2(p + 1) = combinacion(p) - Capa1(p + 1)
+                                                    If Capa2(p + 1) > 0 Then
+                                                        capa2Paquetes = capa2Paquetes + Capa2(p + 1)
+                                                        ' Actualizar la altura de Capa 2
+                                                        capa2Altura = Application.Max(capa2Altura, alturas(1, p + 1))
+                                                    End If
+                                                End If
+                                            End If
+                                        Next p
+                                        
+                                        If numCamion = 2 And combinacion(3) = 22 Then
+                                            Debug.Print " Capa1Altura ="; capa1Altura; ", capa2Altura = "; capa2Altura
+                                        End If
+                                        
+                                        ' Asegurar que las columnas de Malla en las Capas sean 0 y las columnas de No Malla en las Pilas sean 0
+                                        For p = 1 To 7
+                                            If familias(1, p) = "MALLA" Then
+                                                Capa1(p) = 0
+                                                Capa2(p) = 0
+                                            Else
+                                                Pila1(p) = 0
+                                                Pila2(p) = 0
+                                            End If
+                                        Next p
+                                        alturaTotal = Application.Max(pila1Altura, pila2Altura) + capa1Altura + capa2Altura
+                                        Dim alturaTotalCALCULADA As Double
+                                        alturaTotalCALCULADA = EstimarAlturaGlobal(numCamion, combinacion, alturas, familias, _
+                                                                                    MaxPaqCap, numArticulos)
+                                        If numCamion = 17 And (combinacion(0) = 8) Then
+                                                Debug.Print "Camion = "; numCamion & ". Combinacion = ("; Join(combinacion, ", ") & ". Camion " & numCamion & ". COMB.Candidata " & _
+                                                "), Peso =   " & Int(pesocomb * 100) / 100 & ", Alt    =" & Int(alturaTotal * 100) / 100 & ", Pila1: Paq#Alt = " & pila1Paquetes & "#" & pila1Altura & ", Pila2: Paq#Alt = " & _
+                                                pila2Paquetes & "#" & pila2Altura & ", " & ", Capa1: Paq#Alt = " & capa1Paquetes & "#" & capa1Altura & ", Capa2: Paq#Alt = " _
+                                               & capa2Paquetes & "#" & capa2Altura
+                                        End If
+                                              
+                                        ' Verificar si la combinación cumple con los criterios de peso y de altura
+                                        If (pesocomb > Pmax Or pesocomb < Pmin Or alturaTotal > Altmax) Then
+                                            validCombinacion = False
+                                            If numCamion = 17 And (combinacion(0) = 8) Then
+                                                Debug.Print "Dia = "; diaActual & ". Combinacion = ("; Join(combinacion, ", ") & "), Camion:" & numCamion & _
+                                                 ". NO VALIDA 1. Peso = " & Int(pesocomb * 100) / 100 & ", alt = " & Int(alturaTotal * 100) / 100; ", altFUNCION = " & Int(alturaTotalCALCULADA * 100) / 100; ""
+                                            End If
+                                            GoTo NextCombinacion
+                                         Else
+                                            If numCamion = 17 And (combinacion(0) = 8) Then
+                                                Debug.Print "Dia = "; diaActual & ". Combinacion = ("; Join(combinacion, ", ") & "), Camion:" & numCamion & ".VALIDA 1= (" & _
+                                                    Join(combinacion, ", ") & "),Peso = " & Int(pesocomb * 100) / 100 & ",Alt =" & Int(alturaTotal * 100) / 100
+                                            End If
+                                        End If
+                                                                                            
+'                              **************************************************************************************
+' *****************************  L A    C O M B I N A C I O N     E S     V A L I D A   *****************************
+'                              **************************************************************************************
+
+                                        ' Verificar si la combinación contiene artículos Cargables y no cargados en el ciclo
+                                        Dim contieneArtCargablesenCicloNoCargados As Boolean
+                                        contieneArtCargablesenCicloNoCargados = False
+                                        For p = 0 To 6
+                                            If combinacion(p) > 0 And cartera(1, p + 1) > 0 And stockDisponible(1, p + 1) > 0 And articulosCargadosEnCiclo(p + 1) = 0 Then
+                                                contieneArtCargablesenCicloNoCargados = True
+                                                Exit For
+                                            End If
+                                        Next p
+                                                
+                                        ' Si no contiene artículos Cargables-nocargados, verificar si contiene articulos ya-cargados en el ciclo
+                                        If Not contieneArtCargablesenCicloNoCargados Then
+                                            Dim contieneArtCargablesenCicloYaCargados As Boolean
+                                            contieneArtCargablesenCicloYaCargados = False
+                                            For p = 0 To 6
+                                                If combinacion(p) > 0 And cartera(1, p + 1) > 0 And stockDisponible(1, p + 1) > 0 And articulosCargadosEnCiclo(p + 1) > 0 Then
+                                                    contieneArtCargablesenCicloYaCargados = True
+                                                    Exit For
+                                                End If
+                                            Next p
+                                        End If
+                                        
+                                        ' Calcular los indicadores y variables de Urgenets QUE DEPENDEN DE LA COMBINACION:
+                                        Dim nArtUrgCargablesComb As Long, valComb As Long
+                                        NartComb = 0
+                                        cantCargablesComb = 0
+                                        cantUrgentesComb = 0
+                                        cantUrgentesCargablesComb = 0
+                                        nArtUrgCargablesComb = 0
+                                        Dim restante As Long, cargadoF1 As Long, cargadoF2 As Long, cargadoF3 As Long, cantAlternanciaComb As Long
+                                        Dim cantCargadoFecha1 As Long, cantCargadoFecha2 As Long, cantCargadoFecha3 As Long
+                                        cantCargadoFecha1 = 0
+                                        cantCargadoFecha2 = 0
+                                        cantCargadoFecha3 = 0
+                                        cargadoF1 = 0
+                                        cargadoF2 = 0
+                                        cargadoF3 = 0
+                                        articulosNuevos = 0
+                                        cantAlternanciaComb = 0
+                                        For p = 1 To 7
+                                            ' Inicialización
+                                            cargablesComb(p) = 0
+                                            urgentesComb(p) = 0
+                                            urgentesCargablesComb(p) = 0
+                                            ' calculos
+                                            valComb = combinacion(p - 1)
+                                            If valComb > 0 Then
+                                                valCart = cartera(1, p)
+                                                valStock = stockDisponible(1, p)
+                                                valUrg = UrgentesCartera(1, p)
+                                                ' Número de artículos de la Combinación
+                                                NartComb = NartComb + 1
+                                                ' Cantidad total de paquetes Cargables de la combinacion
+                                                cargablesComb(p) = Application.Min(valComb, valCart, valStock)
+                                                If valCart > 0 And valStock > 0 Then
+                                                    cantCargablesComb = cantCargablesComb + cargablesComb(p)
+                                                End If
+                                                ' Cantidad total de paquetes urgenets de la Combinación
+                                                urgentesComb(p) = Application.Min(valComb, valUrg)
+                                                If valUrg > 0 Then
+                                                    cantUrgentesComb = cantUrgentesComb + urgentesComb(p)
+                                                End If
+                                                ' Cantidad total de paquetes Urgentes Cargables de la combinacion y _
+                                                  Numero de articulos con paquetes urgentes cargables en la combinacion
+                                                urgentesCargablesComb(p) = Application.Min(urgentesCargablesCartera(p), combinacion(p - 1))
+                                                If valUrg > 0 And valStock > 0 Then
+                                                    cantUrgentesCargablesComb = cantUrgentesCargablesComb + urgentesCargablesComb(p)
+                                                    nArtUrgCargablesComb = nArtUrgCargablesComb + 1
+                                                End If
+                                                
+                                                ' calcular la cantidad que carga la combinacion de cada fecha de carga X
+                                                ' Empezamos con la cantidad cargada para cada artículo
+                                                restante = combinacion(p - 1)
+                                                
+                                                ' Se asigna a Fecha1 en la medida de lo permitido
+                                                If (fecha1Carga(1, p) = 0 Or diaActual >= fecha1Carga(1, p)) Then
+                                                     cargadoF1 = Application.Min(npaqfecha1Carga(p), restante)
+                                                     restante = restante - cargadoF1
+                                                End If
+                                                ' De lo que sobra se asigna a Fecha2 (si corresponde)
+                                                If (fecha2Carga(1, p) = 0 Or diaActual >= fecha2Carga(1, p)) Then
+                                                     cargadoF2 = Application.Min(npaqfecha2Carga(p), restante)
+                                                     restante = restante - cargadoF2
+                                                End If
+                                                ' Finalmente, el remanente se asigna a Fecha3 (si corresponde)
+                                                If (fecha3Carga(1, p) = 0 Or diaActual >= fecha3Carga(1, p)) Then
+                                                     cargadoF3 = Application.Min(npaqfecha3Carga(p), restante)
+                                                     restante = restante - cargadoF3
+                                                End If
+                                                cantCargadoFecha1 = cantCargadoFecha1 + cargadoF1
+                                                cantCargadoFecha2 = cantCargadoFecha2 + cargadoF2
+                                                cantCargadoFecha3 = cantCargadoFecha3 + cargadoF3
+                                                
+                                                ' calcular la cantidad de articulos para cumplir la alternancia que carga la combinaicon
+                                                If alternanciaArticulos(p) = "SI" Then
+                                                    If stockDisponible(1, p) > 0 And cartera(1, p) > 0 And articulosCargadosEnCiclo(p) = 0 Then
+                                                        cantAlternanciaComb = cantAlternanciaComb + combinacion(p - 1)
+                                                    End If
+                                                End If
+                                                
+                                                ' calcular la cantidad de articulos nuevos que carga la combinaicon
+                                                If combinacion(p - 1) > 0 And articulosCargadosEnCiclo(p) = 0 Then
+                                                    articulosNuevos = articulosNuevos + 1
+                                                End If
+                                            End If
+                                        Next p
+                                    
+                                        ' CALCULAR EL GRADO DE CUMPLIMIENTO DE URGENTES
+                                        Dim gradoCumplimientoUrgentesComb As Long
+                                        gradoCumplimientoUrgentesComb = CumpleUrgentesComb(combinacion, urgentesCargablesCartera, cantUrgentesCargablesCartera)
+                                        
+                                        If numCamion = 17 And (combinacion(0) = 8) Then
+                                            'Debug.Print "=============================================================================================================================="
+                                            Debug.Print "Dia = " & diaActual & ". Combinacion = (" & Join(combinacion, ", ") & "), canturgcargcart = "; cantUrgentesCargablesCartera; _
+                                            ", canturgcargcomb = "; cantUrgentesCargablesComb; ", gradocumpurgcomb= "; gradoCumplimientoUrgentesComb
+                                        End If
+                                                            
+                                        ' CALCULAR EL GRADO DE CUMPLIMIENTO DEL ORDEN DE CARGA ESTABLECIDO
+                                        Dim gradoCumplimientoOrdenComb As Long
+                                        gradoCumplimientoOrdenComb = CumpleOrdenComb(combinacion, CargablesPorOrden, cantCargablesPorOrden, ordencarga, ordenesPrioritarias, numCamion)
+                                         If numCamion = 17 And (combinacion(0) = 8) Then _
+                                            Debug.Print "Dia = " & diaActual & ". Combinacion = (" & Join(combinacion, ", ") & "), CantCargablesPorOrden = " & cantCargablesPorOrden; _
+                                                    ", gradoCumplimientoOrdenComb= " & gradoCumplimientoOrdenComb
+                                                      
+                                        '  CALCULAR EL GRADO DE CUMPLIMIENTO DE LA ALTERNANCIA
+                                        'Calcular los indicadores y variables de Alternancia que dependen de la combinacion
+                                        Dim gradoCumplimientoAlternanciaComb As Long
+                                        necesitaAlternancia = False
+                                        For p = 1 To 7
+                                            If alternanciaArticulos(p) = "SI" And EsarticuloCargableEnCiclo(p) = 1 And articulosCargadosEnCiclo(p) = 0 Then
+                                                necesitaAlternancia = True
+                                                Exit For
+                                            End If
+                                        Next p
+                                        gradoCumplimientoAlternanciaComb = CumplealternanciaComb(combinacion, alternanciaArticulos, articulosCargadosEnCiclo, cargablesPorAlternancia)
+
+                                        If numCamion = 17 And (combinacion(0) = 8) Then
+                                            Debug.Print "Dia = " & diaActual & ". Combinacion = (" & Join(combinacion, ", ") & "), necesitaalternancia =  "; necesitaAlternancia; _
+                                                        ", ccantCargablesPorAlternancia = "; cantCargablesPorAlternancia; ", gradoCumplimientoAlternanciaComb = "; gradoCumplimientoAlternanciaComb
+                                            Debug.Print "Dia = " & diaActual & ". Combinacion = (" & Join(combinacion, ", ") & ")ENTRA EN DESCARTE FINAL"
+                                        End If
+                                                           
+                                        'DESCARTE FINAL DE COMBINACIONES
+                                        validCombinacion = True
+                                        ' foundvalidcombination = True
+                                        '  If diaactual =2 And combinacion(3) = 25 or (combinacion(3) = 23 and combinacion(1)=1) Then Debug.Print "Entra en descarteFinal"
+                                        Dim resultadoUrgentes As String
+                                        Dim resultadoOrden As String
+                                        Dim resultadoAlternancia As String
+                                        If DescarteFinal(alternanciaArticulos, cantUrgentesCargablesCartera, cantCargablesPorOrden, cantCargablesPorAlternancia, _
+                                                    gradoCumplibleUrgentes, gradoCumplimientoUrgentesComb, _
+                                                    gradoCumplibleOrden, gradoCumplimientoOrdenComb, _
+                                                    gradoCumplibleAlternancia, gradoCumplimientoAlternanciaComb, resultadoUrgentes, resultadoOrden, _
+                                                    resultadoAlternancia) Then
+                                             If numCamion = 17 And (combinacion(0) = 8) Then _
+                                                Debug.Print "Camion = " & numCamion & ", COMBINACION = " & Join(combinacion, ", ") & _
+                                                    "), DESCARTADA- Por Urgentes= "; resultadoUrgentes; ", Por Orden= "; resultadoOrden; ", Por Alternancia = "; _
+                                                    resultadoAlternancia
+                                            GoTo NextCombinacion
+                                        End If
+                                         
+                                        ' DETECCION VALIDACION E IMPRESION TEMPRANA DE CAMION MONOPRODUCTO OPTIMO
+                                        Dim gradoCumplimientoUrgentesMEJORComb As Long, gradoCumplimientoOrdenMEJORComb As Long, gradoCumplimientoAlternanciaMEJORComb As Long
+                                        
+                                        If EsCamionOptimoMonoproducto( _
+                                                combinacion, _
+                                                cantUrgentesCargablesCartera, urgentesCargablesCartera, _
+                                                gradoCumplibleUrgentes, gradoCumplimientoUrgentesComb, _
+                                                cantidadMaximaProducto, _
+                                                cantCargableFecha1, cantCargableFecha2, cantCargableFecha3, _
+                                                maxFechaCarga, _
+                                                cantCargablesPorOrden, ordencarga, CargablesPorOrden, _
+                                                gradoCumplibleOrden, gradoCumplimientoOrdenComb, _
+                                                necesitaAlternancia, gradoCumplibleAlternancia, gradoCumplimientoAlternanciaComb, _
+                                                numArticulos, indiceProducto) Then
+                                                                                    
+                                            'combinacion cumple con criterios de camion OPTIMO, es válida, cumple urgencias, orden de carga y alternancia,
+                                            If numCamion = 17 And (combinacion(0) = 8) Then
+                                                Debug.Print "Dia = " & diaActual & "Cam:" & numCamion & ". Combinacion =(" & Join(combinacion, ", ") & "). CAMION MONO OPIIMO"; _
+                                                    ", gradocumplibleurg= "; gradoCumplibleUrgentes; ", gradocumpurgcomb= "; gradoCumplimientoUrgentesComb _
+                                                    ; ", gradoCumplibleOrden= " & gradoCumplibleOrden; ", gradoCumplOrdenComb= " & gradoCumplimientoOrdenComb _
+                                                    ; ", gradoCumplibleAlternancia = "; gradoCumplibleAlternancia; ", gradoCumplAlternComb = "; gradoCumplimientoAlternanciaComb
+                                            End If
+                                            bestCombinacion = combinacion
+                                            bestAlturaTotal = alturaTotal
+                                            maxUrgentes = cantUrgentesComb
+                                            minNart = NartComb
+                                            maxPesoComb = pesocomb
+                                            Foundvalidcombinacion = True
+                                            gradoCumplimientoUrgentesMEJORComb = gradoCumplimientoUrgentesComb
+                                            gradoCumplimientoOrdenMEJORComb = gradoCumplimientoOrdenComb
+                                            gradoCumplimientoAlternanciaMEJORComb = gradoCumplimientoAlternanciaComb
+                                            For p = 1 To 7
+                                                bestPila1(p) = Pila1(p)
+                                                bestPila2(p) = Pila2(p)
+                                                bestCapa1(p) = Capa1(p)
+                                                bestCapa2(p) = Capa2(p)
+                                            Next p
+                                           
+                                          ' Calcular la altura real de la combinación monoproducto
+                                          '  Dim MaxPaqCapaForMono As Long ' Necesario para EstimarAltura
+                                          '  MaxPaqCapaForMono = 1 ' Valor por defecto
+                                       '
+                                       '     ' Lógica para obtener MaxPaqCapa para el artículo monoproducto, similar a otras funciones
+                                       '     If dictFamilias.Exists(familias(1, indiceProducto)) Then
+                                       '         Dim familiaDataMono As Variant
+                                       '         familiaDataMono = dictFamilias(familias(1, indiceProducto))
+                                       '         If IsArray(familiaDataMono) And UBound(familiaDataMono) >= 3 Then
+                                       '             If UCase(Trim(lcorto(1, indiceProducto))) = "SI" Then
+                                       '                 If IsNumeric(familiaDataMono(3)) Then MaxPaqCapaForMono = CLng(familiaDataMono(3))
+                                       '             Else
+                                       '                 If IsNumeric(familiaDataMono(2)) Then MaxPaqCapaForMono = CLng(familiaDataMono(2))
+                                       '             End If
+                                       '         End If
+                                       '     End If
+                                       '     ' Si es Malla, EstimarAltura lo manejará correctamente con MaxPaqCapa=0
+                                       '     If familias(1, indiceProducto) = "MALLA" Then MaxPaqCapaForMono = 0
+                                       '    bestAlturaTotal = EstimarAltura(indiceProducto, combinacion(indiceProducto - 1), alturas, familias, MaxPaqCapaForMono)
+                                       '     For p = 1 To 7
+                                       '         If combinacion(p - 1) > 0 Then
+                                       '             maxUrgentes = maxUrgentes + Application.Min(combinacion(p - 1), UrgentesCartera(1, p))
+                                       '         End If
+                                       '         bestPila1(p) = 0
+                                       '         bestPila2(p) = 0
+                                       '         bestCapa1(p) = 0
+                                       '         bestCapa2(p) = 0
+                                       '     Next p
+                                       '     If familias(1, indiceProducto) = "MALLA" Then
+                                       '         bestPila1(indiceProducto) = combinacion(indiceProducto - 1)
+                                       '     Else
+                                       '         bestCapa1(indiceProducto) = combinacion(indiceProducto - 1)
+                                       '     End If
+                                            
+                                            If numCamion = 17 And (combinacion(0) = 8) Then
+                                                Debug.Print "Dia = " & diaActual & "Cam:" & numCamion & ". Combinacion =(" & Join(combinacion, ", ") & ") . SELECCION TEMPRANA POR CAMION MONO OPTIMO. cantUrgentesComb = " & _
+                                                        cantUrgentesComb & ", maxUrgentes = " & maxUrgentes & ", NartComb = " & NartComb & ", MinNart = " & minNart & ", pesoComb = " & pesocomb & ", MaxpesoTotal = " & _
+                                                        maxPesoComb & ", Nuevos = " & articulosNuevos & ", Nuevosmejor = " & articulosnuevosmejor
+                                                gradoCumplimientoUrgentesMEJORComb = gradoCumplimientoUrgentesComb
+                                                gradoCumplimientoOrdenMEJORComb = gradoCumplimientoOrdenComb
+                                                gradoCumplimientoAlternanciaMEJORComb = gradoCumplimientoAlternanciaComb
+                                            End If
+                                            GoTo ImprimirCombinacion
+                                        End If
+                                        If numCamion = 17 And (combinacion(0) = 8) Then Debug.Print "Dia = " & diaActual & "Cam:" & numCamion & ". Combinacion =(" & Join(combinacion, ", ") & _
+                                                "). NO es camion optimo"
+
+' ****************************** COMPARACION Y SELECCION DE LA MEJOR COMBINACION     ************************************
+inicioseleccion:
+                                        Dim puntajeCombinacion As Double
+                                        puntaje = EvaluarCombinacion(alternanciaArticulos, numCamion, combinacion, _
+                                                            pesos, Pmax, Pmin, numArticulos, NartComb, _
+                                                            urgentesCargablesCartera, cantUrgentesCargablesCartera, _
+                                                            gradoCumplibleUrgentes, gradoCumplimientoUrgentesComb, _
+                                                            cantCargableFecha1, cantCargadoFecha1, _
+                                                            cantCargableFecha2, cantCargadoFecha2, _
+                                                            cantCargableFecha3, cantCargadoFecha3, _
+                                                            cantAlternanciaComb, cargablesPorAlternancia, cantCargablesPorAlternancia, _
+                                                            MaxX, ordenesPrioritarias, ordencarga, CargablesPorOrden, _
+                                                            articulosCargadosEnCiclo, cargablesCartera, maxFechaCarga)
+                                                                      
+                                        If numCamion = 17 And (combinacion(0) = 8) Then
+                                            Debug.Print _
+                                            "Dia = " & diaActual & ". Combinacion = (" & Join(combinacion, ", ") & "), Camion:" & numCamion & " puntaje = "; puntaje; " , gradoCumplimientoUrgentesComb = " _
+                                            & gradoCumplimientoUrgentesComb & ", gradoCumplimientoOrdenComb = " & gradoCumplimientoOrdenComb & ", gradoCumplimientoAlternanciaComb = " & gradoCumplimientoAlternanciaComb
+                                        End If
+                                        If puntaje > puntajeMejor Then 'Selección de la mejor combinación
+                                            ' Actualizar la mejor combinación
+                                            diferenciaPunt = puntaje - puntajeMejor
+                                            puntajeMejor = puntaje
+                                            bestCombinacion = combinacion
+                                            bestAlturaTotal = alturaTotal
+                                            maxUrgentes = cantUrgentesComb
+                                            minNart = NartComb
+                                            maxPesoComb = pesocomb
+                                            Foundvalidcombinacion = True
+                                            gradoCumplimientoUrgentesMEJORComb = gradoCumplimientoUrgentesComb
+                                            gradoCumplimientoOrdenMEJORComb = gradoCumplimientoOrdenComb
+                                            gradoCumplimientoAlternanciaMEJORComb = gradoCumplimientoAlternanciaComb
+                                            For p = 1 To 7
+                                                bestPila1(p) = Pila1(p)
+                                                bestPila2(p) = Pila2(p)
+                                                bestCapa1(p) = Capa1(p)
+                                                bestCapa2(p) = Capa2(p)
+                                            Next p
+                                            
+                                            'If numCamion = 1 And (combinacion(3) = 22 or combinacion(4)=13 ) Then
+                                            If numCamion = 1 Then
+                                                Debug.Print "Dia: " & diaActual & " Cam: " & numCamion & ". Combinacion =(" & Join(combinacion, ", ") & "). MEJOR ENCONTRADA. " & ", puntaje = " & puntaje _
+                                                            ; ", NartComb = " & NartComb & ", pesoComb = " & pesocomb _
+                                                            ; ", GradoUrgComb = " & gradoCumplimientoUrgentesComb & ", GradoOrdenComb = " & gradoCumplimientoOrdenComb _
+                                                            ; ", GradoAltComb = " & gradoCumplimientoAlternanciaComb
+                                            End If
+                                        Else
+                                            ' Debug.Print de "NO MEJORA"
+                                            
+                                            'If numCamion = 1 And (combinacion(3) = 22 or combinacion(4)=13 ) Then
+                                            'If numCamion = 1 Then
+                                            '    Debug.Print "Dia: " & diaActual & " Cam: " & numCamion & ". Combinacion =(" & Join(combinacion, ", ") & "). NO MEJORA --> SIGUIENTE. " & _
+                                            '                "Puntuacion = "; puntaje; ", difPunt = "; diferenciaPunt; ", NartComb = " & NartComb & ", pesoComb = " & pesocomb _
+                                            '                ; ", GradoUrgComb = " & gradoCumplimientoUrgentesComb & ", GradoOrdenComb = " & gradoCumplimientoOrdenComb _
+                                            '                ; ", GradoAltComb = " & gradoCumplimientoAlternanciaComb
+                                            'End If
+                                        End If
+                                    End If ' cierra pesoComb>= Pmin
+NextCombinacion:
+                                Next o
+                            Next n
+                        Next m
+                    Next L
+                Next k
+            Next j
+        Next i
+
+    ' Salir del bucle si no hay más combinaciones válidas
+    If diaActual > diaUltimaDisponibilidad And Not Foundvalidcombinacion And diaActual > maxFechaCarga Or TmMaxTot < Pmin Then ' antes Not Foundvalidcombinacion
+        Debug.Print "FIN: Dia " & diaActual & ", Cam " & numCamion & ", valid = "; validCombinacion; ",foundvalid = "; Foundvalidcombinacion & ", maximafechcarga= " & maxFechaCarga _
+        ; ". diaUltimaDisponibilidad = " & diaUltimaDisponibilidad & ". SALE DEL LOOP PORQUE NO HAY COMBINACIONES VALIDAS DESPUES DE LA ULTIMA FECHA DE DISPONIBILIDAD"
+    '    Debug.Print " "
+        Exit Do
+    End If
+
+ImprimirCombinacion:
+    'Debug.Print "mejorpuntaje = " & puntajeMejor & ", Foundvalidcombinacion = " & Foundvalidcombinacion
+    'Debug.Print "3.1 IMPR- Dia " & diaActual & ", Cam " & numCamion & ",Combinacion = (" & Join(bestCombinacion, ", ") _
+            & ") . Best Pila1= (" & Join(bestPila1, ", ") & "), Best Pila2= (" & Join(bestPila2, ", ") & ")"
+    'If numcamion= 1515 And mododebug And (combinacion(3) = 25 Or combinacion(3) = 24 Or combinacion(4) = 10)  Then
+    'Debug.Print "Dia = " & diaActual & "Cam:" & numCamion & ". Combinacion =(" & Join(combinacion, ", ") & ")"; _
+        ", gradocumplibleurg= "; gradoCumplibleUrgentes; ", gradocumpurgcomb= "; gradoCumplimientoUrgentesComb; _
+        ", gradoCumplibleOrden= " & gradoCumplibleOrden; ", gradoCumplimientoOrdenComb= " & gradoCumplimientoOrdenComb; _
+        ", gradoCumplibleAlternancia = "; gradoCumplibleAlternancia; ", gradoCumplimientoAlternanciaComb = "; gradoCumplimientoAlternanciaComb
+    'End If
+    Debug.Print "================================================================================================================================================================"
+    Debug.Print ; "IMPRESION: -Dia:" & diaActual & "-Cam:" & numCamion & "- Comb = (" & Join(bestCombinacion, ", ") _
+        & ") Puntaje =" & puntajeMejor & ", Peso= " & maxPesoComb & ", Alt= " & bestAlturaTotal & ", GradoCumpUrg= "; gradoCumplimientoUrgentesComb; ", GradoCumpOrden= "; gradoCumplimientoOrdenComb; _
+        ", GradoCumpAlt= "; gradoCumplimientoAlternanciaComb
+    Debug.Print "================================================================================================================================================================"
+        
+    ' Escribir la mejor combinación encontrada en peso
+    If Not Foundvalidcombinacion Then
+        bestAlturaTotal = 0
+        maxPesoComb = 0
+        If IsEmpty(bestCombinacion) Then
+            ReDim bestCombinacion(0 To 6) As Variant
+        End If
+        For p = 1 To 7
+            bestPila1(p) = 0
+            bestPila2(p) = 0
+            bestCapa1(p) = 0
+            bestCapa2(p) = 0
+            bestCombinacion(p - 1) = 0
+        Next p
+    End If
+    '   Debug.Print "  3.3 IMPRESION: -Dia:" & diaActual & "-Cam:" & numCamion & "-       Combinacion = (" & Join(bestCombinacion, ", ") _
+            & ") Peso, Alt, UrgentesCartera = " & maxPesoComb & "# " & bestAlturaTotal & "# " & maxUrgentes
+    ws.Range("A" & fila).Value = "Día " & diaActual
+    ws.Range("AL" & fila).Value = bestAlturaTotal
+    ws.Range("AM" & fila).Value = maxPesoComb
+    ws.Range("AN" & fila).Value = maxUrgentes
+    For p = 1 To 7
+            ws.Cells(fila, 2 + p).Value = bestPila1(p) * pesos(1, p)
+            ws.Cells(fila, 9 + p).Value = bestPila2(p) * pesos(1, p)
+            ws.Cells(fila, 16 + p).Value = bestCapa1(p) * pesos(1, p)
+            ws.Cells(fila, 23 + p).Value = bestCapa2(p) * pesos(1, p)
+            ws.Cells(fila, 51 + p).Value = bestPila1(p)
+            ws.Cells(fila, 58 + p).Value = bestPila2(p)
+            ws.Cells(fila, 65 + p).Value = bestCapa1(p)
+            ws.Cells(fila, 72 + p).Value = bestCapa2(p)
+    Next p
+            ws.Range("B" & fila).Value = "Camión " & numCamion
+            ' Convertir y escribir la combinación en peso en el rango AE:AO
+            Dim combinacionEnPeso(1 To 1, 1 To 7) As Double  ' Formato compatible con Excel
+            For p = 1 To 7
+                combinacionEnPeso(1, p) = bestCombinacion(p - 1) * pesos(1, p)
+            Next p
+            ws.Range("AE" & fila & ":AK" & fila).Value = combinacionEnPeso
+            ws.Range("CB" & fila & ":CH" & fila).Value = bestCombinacion
+            ws.Range("AO" & fila).Value = cicloActual
+            ws.Range("AP" & fila).Value = gradoCumplibleUrgentes
+            ws.Range("AQ" & fila).Value = gradoCumplimientoUrgentesMEJORComb
+            ws.Range("AR" & fila).Value = gradoCumplibleOrden
+            ws.Range("AS" & fila).Value = gradoCumplimientoOrdenMEJORComb
+            ws.Range("AT" & fila).Value = gradoCumplibleAlternancia
+            ws.Range("AU" & fila).Value = gradoCumplimientoAlternanciaMEJORComb
+            fila = fila + 1
+   
+            ' ACTUALIZAR DATOS BÁSICOS DESPUÉS DE CARGAR CAMIÓN
+                
+            ' Inicializar el contador de dias, camiones, ciclos
+            numCamion = numCamion + 1
+            camionesHoy = camionesHoy + 1
+            If camionesHoy >= camionesDiarios Then
+                diaActual = diaActual + 1
+                camionesHoy = 0
+                ' --- Actualizar la 2ª DISPONIBILIDAD (al inicio del nuevo día) ---
+                For p = 1 To 7
+                    If diaActual = dia2Disponibilidad(1, p) And nuevadisponibilidadusada(p) = 0 Then
+                        stockDisponible(1, p) = stockDisponible(1, p) + stock2Disponibilidad(1, p)
+                        nuevadisponibilidadusada(p) = 1
+                    End If
+                Next p
+            End If
+            numartCargadosenCiclo = 0
+            numartNoCargadosenCiclo = 0
+            For p = 1 To 7
+                Dim itemsCargados As Long
+                itemsCargados = bestCombinacion(IIf(LBound(bestCombinacion) = 0, p - 1, p))
+                ' Guardar la combinación cargada para usarla en el próximo ciclo
+                ultimaCombinacionCargada(p - 1) = itemsCargados
+                cartera(1, p) = cartera(1, p) - itemsCargados
+                stockDisponible(1, p) = stockDisponible(1, p) - itemsCargados
+                UrgentesCartera(1, p) = Application.Max(0, UrgentesCartera(1, p) - itemsCargados)
+                articulosCargados(p) = articulosCargados(p) + bestCombinacion(p - 1)
+                articulosCargadosEnCiclo(p) = articulosCargadosEnCiclo(p) + itemsCargados
+                If articulosCargadosEnCiclo(p) > 0 Then numartCargadosenCiclo = numartCargadosenCiclo + 1
+                If ordencarga(1, p) > 0 Then
+                    npaqOrdenCarga(1, p) = Application.Max(0, npaqOrdenCarga(1, p) - itemsCargados)
+                End If
+                EsarticuloCargableEnCiclo(p) = IIf(cartera(1, p) > 0 And stockDisponible(1, p) > 0, 1, 0)
+                If EsarticuloCargableEnCiclo(p) = 1 And articulosCargadosEnCiclo(p) = 0 Then _
+                    numartNoCargadosenCiclo = numartNoCargadosenCiclo + 1
+               
+               ' Actualizar las CANTIDADES RESTANETS de cada fechaXCarga impuestas
+                ' Reducir de npaqFecha1Carga primero
+                If itemsCargados > 0 And npaqfecha1Carga(p) > 0 Then
+                    Dim reduccionFase1 As Long
+                    reduccionFase1 = Application.Min(itemsCargados, npaqfecha1Carga(p))
+                    npaqfecha1Carga(p) = npaqfecha1Carga(p) - reduccionFase1
+                    itemsCargados = itemsCargados - reduccionFase1
+                End If
+                ' Luego reducir de npaqFecha2Carga
+                If itemsCargados > 0 And npaqfecha2Carga(p) > 0 Then
+                    Dim reduccionFase2 As Long
+                    reduccionFase2 = Application.Min(itemsCargados, npaqfecha2Carga(p))
+                    npaqfecha2Carga(p) = npaqfecha2Carga(p) - reduccionFase2
+                    itemsCargados = itemsCargados - reduccionFase2
+                End If
+                ' Finalmente reducir de npaqFecha3Carga
+                If itemsCargados > 0 And npaqfecha3Carga(p) > 0 Then
+                    Dim reduccionFase3 As Long
+                    reduccionFase3 = Application.Min(itemsCargados, npaqfecha3Carga(p))
+                    npaqfecha3Carga(p) = npaqfecha3Carga(p) - reduccionFase3
+                    itemsCargados = itemsCargados - reduccionFase3
+                End If
+                ' Asegurar que no haya valores negativos en npaqFechaX (por si acaso)
+                If npaqfecha1Carga(p) < 0 Then npaqfecha1Carga(p) = 0
+                If npaqfecha2Carga(p) < 0 Then npaqfecha2Carga(p) = 0
+                If npaqfecha3Carga(p) < 0 Then npaqfecha3Carga(p) = 0
+            Next p
+                   
+            ' Verificacion de Ciclo Completo
+            cicloCompleto = (numartNoCargadosenCiclo = 0)
+                    
+            ' Guarda el valor de cicloActual actual antes de que se modifique para el siguiente camión.
+            cicloActualPrevio = cicloActual
+            
+            ' Reiniciar el ciclo si es completo
+            'If numCamion = 17 Or numCamion = 18 Then Debug.Print "numartNoCargadosenCiclo = " & numartNoCargadosenCiclo; ", ciclo completo = "; cicloCompleto
+            If cicloCompleto Then
+                cicloActual = cicloActual + 1
+                Debug.Print "Ciclo para Camion " & numCamion & " DESPUES de actualizacion = " & cicloActual
+                ' ultimoArticuloPorFamilia.RemoveAll ' Limpiar historial
+                For p = 1 To 7
+                    articulosCargadosEnCiclo(p) = 0
+                Next p
+                 'If numcamion= 151 Or numcamion = 7 Then Debug.Print Join(articulosCargadosEnCiclo, ",")
+            End If
+
+        ' Verificar Oden de carga despues de cargar un camión
+            ExisteOrdenCarga = (Application.Sum(ordencarga) > 0) And (Application.Sum(npaqOrdenCarga) > 0)
+    
+        ' Debug
+       ' If cicloCompleto = True Then
+            'Debug.Print "4.1.POSTIMP-Dia:" & diaactual - 1 & "-Cam:" & numCamion - 1 & ".Cicl:" & cicloActual & "-COMPLETO- Comb = (" _
+                & Join(bestCombinacion, ", "); "). cantCargablesComb en ciclo= (" & Join(EsarticuloCargableEnCiclo, ", ") _
+                & "). Cargados en ciclo= (" & Join(articulosCargadosEnCiclo, ", ") & ")"
+        'Else
+                'Debug.Print "4.2.POSTIMP-Dia:" & diaactual - 1 & "-Cam:" & numCamion - 1 & ".Cicl:" & cicloActual & "-NO COMPL- Comb = (" _
+                & Join(bestCombinacion, ", "); "). cantCargablesComb en ciclo= (" & Join(EsarticuloCargableEnCiclo, ", ") _
+                & "). Cargados en ciclo= (" & Join(articulosCargadosEnCiclo, ", ") & ")"
+        'End If
+       
+       ' Debug.Print "  5.  FIN LOOP     -Dia:" & diaactual - 1 & "-Cam:" & numCamion - 1
+                                                                               
+        ' BORRAR . Salida de emergencia
+        If diaActual >= 30 Then
+            MsgBox ("sale por el dia 30")
+            Exit Do
+         End If
+Loop
+    
+    ' Añadir el último camión con los restos en una nueva línea
+    fila = fila + 1
+    Dim remainingCombinacion As Variant
+    remainingCombinacion = Array(0, 0, 0, 0, 0, 0, 0)
+    For p = 0 To 6
+        remainingCombinacion(p) = cartera(1, p + 1)
+    Next p
+    'If Application.Sum(remainingCombinacion) > 0 Then
+        Dim remainingPesoComb As Double
+        Dim remainingAlturaTotal As Double
+        Dim remainingUrgentesTotal As Long
+        remainingPesoComb = 0
+        remainingAlturaTotal = 0
+        remainingUrgentesTotal = 0
+        Dim remainingCombinacionEnPeso(1 To 7) As Double
+        For p = 1 To 7
+            remainingPesoComb = remainingPesoComb + remainingCombinacion(p - 1) * pesos(1, p)
+            remainingUrgentesTotal = remainingUrgentesTotal + Application.Min(remainingCombinacion(p - 1), UrgentesCartera(1, p))
+            remainingCombinacionEnPeso(p) = remainingCombinacion(p - 1) * pesos(1, p)
+        Next p
+        ws.Range("AE" & fila & ":AK" & fila).Value = remainingCombinacionEnPeso
+        ws.Range("AM" & fila).Value = remainingPesoComb
+        ws.Range("AN" & fila).Value = remainingUrgentesTotal
+        ws.Range("B" & fila).Value = "Restos"
+    'End If
+    
+    ' Detener el temporizador y mostrar el tiempo de cálculo y el último día con carga
+    endTime = Timer
+    MsgBox "Tiempo de cálculo: " & Format(endTime - startTime, "0.00") & " segundos"
+    
+    ' Restaurar la actualización de pantalla, el cálculo automático y eventos
+    Application.ScreenUpdating = True
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
+End Sub
+'================================================================================
+' Devuelve True/False si ESTA combinación es el camion
+' mono-producto óptimo, considerando urgentes, orden de carga y alternancia.
+'================================================================================
+Public Function EsCamionOptimoMonoproducto( _
+    ByRef combinacion As Variant, _
+    ByVal cantUrgentesCargablesCartera As Long, ByRef urgentesCargablesCartera As Variant, _
+    ByVal gradoCumplibleUrgentes As Long, ByVal gradoCumplimientoUrgentesComb As Long, ByRef cantidadMaximaProducto As Variant, _
+    ByRef cantCargableFecha1 As Variant, ByRef cantCargableFecha2 As Variant, ByRef cantCargableFecha3 As Variant, _
+    ByVal maxFechaCarga As Long, ByVal cantCargablesPorOrden As Long, ByRef ordencarga As Variant, _
+    ByRef CargablesPorOrden As Variant, ByVal gradoCumplibleOrden As Long, ByVal gradoCumplimientoOrdenComb As Long, _
+    ByVal necesitaAlternancia As Boolean, ByVal gradoCumplibleAlternancia As Long, ByVal gradoCumplimientoAlternanciaComb As Long, _
+    ByVal numArticulos As Long, ByRef indiceProducto As Long _
+) As Boolean
+
+    Dim i           As Long
+    Dim countProd   As Long
+    Dim idx         As Long
+
+    ' 1) Un solo artículo cargado
+    For i = LBound(combinacion) To UBound(combinacion)
+        If combinacion(i) > 0 Then
+            countProd = countProd + 1
+            idx = i
+        End If
+    Next
+    If countProd <> 1 Then Exit Function
+
+    indiceProducto = idx + 1
+
+    ' 2) Plena carga de ese artículo
+    If combinacion(idx) <> cantidadMaximaProducto(indiceProducto) Then Exit Function
+
+    ' 3) Fechas de carga
+    'If maxFechaCarga >= 1 Then If combinacion(idx) > cantCargableFecha1(indiceProducto) Then Exit Function
+    'If maxFechaCarga >= 2 Then If combinacion(idx) > cantCargableFecha2(indiceProducto) Then Exit Function
+    'If maxFechaCarga >= 3 Then If combinacion(idx) > cantCargableFecha3(indiceProducto) Then Exit Function
+
+    ' 4) Urgentes (solo si había demanda)
+    If gradoCumplibleUrgentes > 0 Then
+        If gradoCumplimientoUrgentesComb <> gradoCumplibleUrgentes Then Exit Function
+    End If
+
+    ' 5) Órdenes (solo si hay paquetes por orden)
+    If cantCargablesPorOrden > 0 Then
+        If ordencarga(1, indiceProducto) = 0 Then Exit Function
+        If combinacion(idx) < CargablesPorOrden(indiceProducto) Then Exit Function
+    End If
+
+    ' 6) Alternancia (solo si es necesaria)
+    If necesitaAlternancia And gradoCumplibleAlternancia > 0 Then
+        If gradoCumplimientoAlternanciaComb <> gradoCumplibleAlternancia Then Exit Function
+    End If
+
+    ' Si llegamos aquí, es el PRIMER mono­óptimo válido
+    EsCamionOptimoMonoproducto = True
+End Function
+
+Function DistribuirMallaOptima(combinacion As Variant, alturasMalla As Variant, cantidadesMalla As Variant) As Variant
+    Dim p As Long, q As Long
+    Dim totalAltura As Double
+    Dim pila1Altura As Double
+    Dim pila2Altura As Double
+    Dim pila1Paquetes As Long
+    Dim pila2Paquetes As Long
+    Dim resultado(1 To 4) As Variant
+    Dim paquetes() As Variant
+    Dim numpaquetes As Long
+    
+    ' Calcular la altura total de todos los paquetes de Malla
+    totalAltura = 0
+    For p = LBound(alturasMalla) To UBound(alturasMalla)
+        totalAltura = totalAltura + alturasMalla(p) * cantidadesMalla(p)
+    Next p
+    
+    
+    ' Verificar si hay paquetes de Malla
+    numpaquetes = Application.Sum(cantidadesMalla)
+    If numpaquetes <= 0 Then
+        ' No hay paquetes de Malla, devolver valores predeterminados
+        resultado(1) = 0
+        resultado(2) = 0
+        resultado(3) = 0
+        resultado(4) = 0
+        DistribuirMallaOptima = resultado
+        Exit Function
+    End If
+    
+    ' Crear una lista de paquetes con sus alturas
+    ReDim paquetes(1 To numpaquetes, 1 To 2) ' Columna 1: altura, Columna 2: cantidad
+    
+    Dim index As Long
+    index = 1
+    For p = LBound(alturasMalla) To UBound(alturasMalla)
+        For q = 1 To cantidadesMalla(p)
+            paquetes(index, 1) = alturasMalla(p)
+            paquetes(index, 2) = 1
+            index = index + 1
+        Next q
+    Next p
+    
+    ' Ordenar los paquetes por altura (de mayor a menor)
+    Call OrdenarPaquetesPorAltura(paquetes)
+    
+    ' Distribuir los paquetes entre Pila1 y Pila2
+    pila1Altura = 0
+    pila2Altura = 0
+    pila1Paquetes = 0
+    pila2Paquetes = 0
+    
+    For p = 1 To numpaquetes
+        If pila1Altura <= pila2Altura Then
+            pila1Altura = pila1Altura + paquetes(p, 1)
+            pila1Paquetes = pila1Paquetes + 1
+        Else
+            pila2Altura = pila2Altura + paquetes(p, 1)
+            pila2Paquetes = pila2Paquetes + 1
+        End If
+    Next p
+  
+    ' Devolver las alturas de las pilas y el número de paquetes en cada pila
+    resultado(1) = pila1Altura
+    resultado(2) = pila2Altura
+    resultado(3) = pila1Paquetes
+    resultado(4) = pila2Paquetes
+    
+    DistribuirMallaOptima = resultado
+End Function
+
+Sub OrdenarPaquetesPorAltura(paquetes As Variant)
+    Dim p As Long, q As Long
+    Dim tempAltura As Double
+    Dim tempCantidad As Long
+    
+    ' Ordenar los paquetes por altura (de mayor a menor)
+    For p = LBound(paquetes, 1) To UBound(paquetes, 1) - 1
+        For q = p + 1 To UBound(paquetes, 1)
+            If paquetes(p, 1) < paquetes(q, 1) Then
+                ' Intercambiar alturas
+                tempAltura = paquetes(p, 1)
+                paquetes(p, 1) = paquetes(q, 1)
+                paquetes(q, 1) = tempAltura
+                
+                ' Intercambiar cantidades
+                tempCantidad = paquetes(p, 2)
+                paquetes(p, 2) = paquetes(q, 2)
+                paquetes(q, 2) = tempCantidad
+            End If
+        Next q
+    Next p
+End Sub
+
+Public Function EvaluarCombinacion( _
+    ByRef alternanciaArticulos As Variant, _
+    numCamion As Long, _
+    combinacion As Variant, _
+    pesos As Variant, _
+    Pmax As Double, Pmin As Double, _
+    numArticulos As Long, _
+    NartComb As Long, _
+    urgentesCargablesCartera As Variant, _
+    cantUrgentesCargablesCartera As Long, _
+    gradoCumplibleUrgentes As Long, _
+    gradoCumplUrgentesComb As Long, _
+    cantCargableFecha1 As Long, cantCargadoFecha1 As Long, _
+    cantCargableFecha2 As Long, cantCargadoFecha2 As Long, _
+    cantCargableFecha3 As Long, cantCargadoFecha3 As Long, _
+    cantAlternanciaComb As Long, ByRef cargablesPorAlternancia As Variant, _
+    cantCargablesPorAlternancia As Long, ByRef MaxX As Variant, _
+    ordenesPrioritarias As Variant, ordencarga As Variant, _
+    CargablesPorOrden As Variant, _
+    articulosCargadosEnCiclo As Variant, _
+    cargablesCartera As Variant, maxFechaCarga As Long) As Double
+
+    Const D As Integer = 3 ' número de dígitos por criterio
+    Dim fUrg As Double: fUrg = 10 ^ (6 * D)
+    Dim fFec As Double: fFec = 10 ^ (5 * D)
+    Dim fOrd As Double: fOrd = 10 ^ (4 * D)
+    Dim fEstrategia As Double: fEstrategia = 10 ^ (3 * D) ' (*** NUEVO FACTOR UNIFICADO ***)
+    Dim fNum As Double: fNum = 10 ^ (2 * D)
+    Dim fBal As Double: fBal = 10 ^ (1 * D)
+    Dim fPeso As Double: fPeso = 10 ^ (0 * D)
+
+    '— PESO
+    Dim p As Long, totalWeight As Double
+    For p = 0 To UBound(combinacion)
+        totalWeight = totalWeight + combinacion(p) * pesos(1, p + 1)
+    Next
+    Dim scorePeso As Double
+    scorePeso = 100 - Abs(Pmax - totalWeight) / Pmax * 100
+    If scorePeso < 0 Then scorePeso = 0
+
+    '— URGENTES
+    Dim loadedUrg As Double
+    For p = 1 To numArticulos
+        If urgentesCargablesCartera(p) > 0 Then
+            loadedUrg = loadedUrg + Application.Min(combinacion(p - 1), urgentesCargablesCartera(p))
+        End If
+    Next
+    Dim scoreUrg As Double
+    If cantUrgentesCargablesCartera > 0 _
+       And (gradoCumplibleUrgentes = 0 Or gradoCumplUrgentesComb >= gradoCumplibleUrgentes) Then
+        scoreUrg = loadedUrg / cantUrgentesCargablesCartera * 100
+    Else
+        scoreUrg = 0
+    End If
+
+    '— FECHAS
+    Dim percF1 As Double, percF2 As Double, percF3 As Double
+    If cantCargableFecha1 > 0 Then percF1 = cantCargadoFecha1 / cantCargableFecha1
+    If cantCargableFecha2 > 0 Then percF2 = cantCargadoFecha2 / cantCargableFecha2
+    If cantCargableFecha3 > 0 Then percF3 = cantCargadoFecha3 / cantCargableFecha3
+    
+    Dim scoreFec As Double
+    If maxFechaCarga = 0 Then
+        scoreFec = 0
+    Else
+        scoreFec = percF1 * 1000000# + percF2 * 1000# + percF3
+    End If
+   
+    '— ÓRDENES
+    Dim scoreOrd As Double, iNivel As Long, numNiv As Long
+    numNiv = UBound(ordenesPrioritarias) - LBound(ordenesPrioritarias) + 1
+    For iNivel = LBound(ordenesPrioritarias) To UBound(ordenesPrioritarias)
+        Dim reqNiv As Double, loadNiv As Double, fracOrd As Double
+        For p = 1 To numArticulos
+            If CargablesPorOrden(p) > 0 And ordencarga(1, p) = ordenesPrioritarias(iNivel) Then
+                reqNiv = reqNiv + CargablesPorOrden(p)
+                loadNiv = loadNiv + combinacion(p - 1)
+            End If
+        Next
+        If reqNiv > 0 Then fracOrd = Application.Min(loadNiv / reqNiv, 1) Else fracOrd = 0
+        scoreOrd = scoreOrd + fracOrd * 100 * 10 ^ (3 * (numNiv - (iNivel - LBound(ordenesPrioritarias) + 1)))
+    Next
+
+    '— ALTERNANCIA: solo contamos los “SI”. PUNTUACIÓN ESTRATÉGICA (Alternancia y Liquidación de articulos no autosuficientes)
+    Dim scoreEstrategia As Double
+    Dim totalEstrategicoPosible As Double
+    Dim totalEstrategicoCargado As Double
+    Dim esArticuloEstrategico() As Boolean
+    ReDim esArticuloEstrategico(1 To numArticulos)
+     
+    ' Identificar todos los artículos que son no autosuficientes (cartera<Pmin)
+    For p = 1 To numArticulos
+        Dim esAlternancia As Boolean: esAlternancia = (cargablesPorAlternancia(p) > 0)
+        Dim noAutosuficiente As Boolean: noAutosuficiente = (MaxX(p) * pesos(1, p)) < Pmin And MaxX(p) > 0
+        
+        If esAlternancia Or noAutosuficiente Then
+            esArticuloEstrategico(p) = True
+            totalEstrategicoPosible = totalEstrategicoPosible + MaxX(p)
+        End If
+    Next p
+    
+    ' Calcular el cumplimiento para la combinación actual
+    If totalEstrategicoPosible > 0 Then
+        For p = 1 To numArticulos
+            If esArticuloEstrategico(p) Then
+                totalEstrategicoCargado = totalEstrategicoCargado + combinacion(p - 1)
+            End If
+        Next p
+        scoreEstrategia = (totalEstrategicoCargado / totalEstrategicoPosible) * 100
+    Else
+        scoreEstrategia = 0
+    End If
+    
+    '— NÚMERO DE ARTÍCULOS
+    Dim scoreNumArt As Double
+    If numArticulos > 1 Then
+        scoreNumArt = (numArticulos - NartComb) / (numArticulos - 1) * 100
+    Else
+        scoreNumArt = 100
+    End If
+
+    '— BALANCE DE ARTICULOS
+    Dim cnt As Long, mn As Double, mx As Double, val As Double
+    mn = 1E+99: mx = -1E+99
+    For p = 1 To numArticulos
+        val = combinacion(p - 1)
+        If val > 0 Then
+            cnt = cnt + 1
+            If val < mn Then mn = val
+            If val > mx Then mx = val
+        End If
+    Next
+    Dim scoreBal As Double
+    If cnt > 1 Then
+        scoreBal = mn / mx * 100
+    Else
+        scoreBal = 100
+    End If
+
+    '--- Cálculo final jerárquico
+    EvaluarCombinacion = _
+        fUrg * Round(scoreUrg, 0) + _
+    fFec * Round(scoreFec, 0) + _
+    fOrd * Round(scoreOrd, 0) + _
+    fEstrategia * Round(scoreEstrategia, 0) + _
+    fNum * Round(scoreNumArt, 0) + _
+    fBal * Round(scoreBal, 0) + _
+    fPeso * Round(scorePeso, 0)
+    
+       If numCamion = 17 And (combinacion(0) = 8) Then
+        Debug.Print ". Combinacion = (" & Join(combinacion, ", ") & "), scoreUrg = "; Round(scoreUrg, 0); _
+        ", scoreFec = "; Round(scoreFec, 0); ", scoreOrd= "; Round(scoreOrd, 0); ", scoreEstrategia= "; Round(scoreEstrategia, 0) _
+        ; ", scoreNumArt= "; Round(scoreNumArt, 0); ", scoreBal= "; Round(scoreBal, 0); ", scorePeso= "; Round(scorePeso, 0)
+    End If
+
+End Function
+
+Private Sub OrdenarPrioridades(ByRef arr() As Variant)
+    Dim i As Long, q As Long
+    Dim temp As Variant
+    
+    For i = LBound(arr) To UBound(arr) - 1
+        For q = i + 1 To UBound(arr)
+            If arr(q) < arr(i) Then
+                temp = arr(i)
+                arr(i) = arr(q)
+                arr(q) = temp
+            End If
+        Next q
+    Next i
+End Sub
+
+Function DescarteFinal( _
+    ByRef alternanciaArticulos As Variant, _
+    ByVal cantUrgentesCargablesCartera As Long, _
+    ByVal cantCargablesPorOrden As Long, _
+    ByVal cantCargablesPorAlternancia As Long, _
+    ByVal gradoCumplibleUrgentes As Long, _
+    ByVal gradoCumplimientoUrgentesComb As Long, _
+    ByVal gradoCumplibleOrden As Long, _
+    ByVal gradoCumplimientoOrdenComb As Long, _
+    ByVal gradoCumplibleAlternancia As Long, _
+    ByVal gradoCumplimientoAlternanciaComb As Long, _
+    ByRef resultadoUrgentes As String, ByRef resultadoOrden As String, ByRef resultadoAlternancia As String) As Boolean
+    
+    'On Error GoTo ErrHandler
+    
+    ' Aceptar   = devuelve False y sale de la funcion.
+    ' Descartar = devuelve True y sale de la funcion.
+    ' Continuar = sigue el flujo de la funcion al siguiente criterio.
+    ' Error     = devuelve True y sale de la funcion.
+    ' Los resultados de la evaluacion de la combinacion son mas fiables que los "cumplibles" y se priorizan.
+    '-------------------------------------------------------------------------------
+    '                           (1) Evaluación de URGENTES
+    '                               Matriz para URGENTES:
+    '                           gradoCumplimientoUrgentesComb
+    '                          -1           0             1             2
+    ' gradoCumplibleUrgentes
+    '       -1                 Continuar    Error         Aceptar       Continuar
+    '        0                 Error        Continuar     Error         Error
+    '        1                 Descartar    Error         Aceptar       Continuar
+    '        2                 Descartar    Error         Aceptar       Aceptar
+    '-------------------------------------------------------------------------------
+ 
+    resultadoUrgentes = "No utilizado"
+    resultadoOrden = "NO utilizado"
+    resultadoAlternancia = "No utilizado"
+    'If (cantUrgentesCargablesCartera > 0) And ((gradoCumplibleUrgentes = 1) Or (gradoCumplibleUrgentes = 2)) Then
+        Select Case gradoCumplibleUrgentes
+            Case -1
+                Select Case gradoCumplimientoUrgentesComb
+                    Case -1: resultadoUrgentes = "Continuar"
+                    Case 0:  resultadoUrgentes = "Error"
+                    Case 1:  resultadoUrgentes = "Aceptar"
+                    Case 2:  resultadoUrgentes = "Continuar"
+                    Case Else: resultadoUrgentes = "Error"
+                End Select
+            Case 0
+               Select Case gradoCumplimientoUrgentesComb
+                    Case -1: resultadoUrgentes = "Error"
+                    Case 0:  resultadoUrgentes = "Continuar"
+                    Case 1:  resultadoUrgentes = "Error"
+                    Case 2:  resultadoUrgentes = "Error"
+                    Case Else: resultadoUrgentes = "Error"
+                End Select
+            Case 1
+                Select Case gradoCumplimientoUrgentesComb
+                    Case -1: resultadoUrgentes = "Descartar"
+                    Case 0:  resultadoUrgentes = "Error"
+                    Case 1:  resultadoUrgentes = "Aceptar"
+                    Case 2:  resultadoUrgentes = "Continuar"
+                    Case Else: resultadoUrgentes = "Error"
+                End Select
+            Case 2
+                Select Case gradoCumplimientoUrgentesComb
+                    Case -1: resultadoUrgentes = "Descartar"
+                    Case 0:  resultadoUrgentes = "Error"
+                    Case 1:  resultadoUrgentes = "Aceptar"
+                    Case 2:  resultadoUrgentes = "Aceptar"
+                    Case Else: resultadoUrgentes = "Error"
+                End Select
+            Case Else
+                resultadoUrgentes = "Error"
+        End Select
+
+        If resultadoUrgentes = "Aceptar" Then
+            DescarteFinal = False
+            Exit Function
+        ElseIf (resultadoUrgentes = "Descartar") Or (resultadoUrgentes = "Error") Then
+            DescarteFinal = True
+            Exit Function
+        End If
+        ' Si resultado es "Continuar", se pasa al siguiente criterio.
+    'End If
+
+    '------------------------------------------------------------------------------
+    ' (2) Evaluación de ÓRDENES
+    ' Matriz para ÓRDENES (idéntica a la de URGENTES):
+    '                           gradoCumplimientoOrdenComb
+    '                          -1           0             1             2
+    ' gradoCumplibleOrden
+    '       -1                 Continuar    Error         Aceptar       Continuar
+    '        0                 Error        Continuar     Error         Error
+    '        1                 Descartar    Error         Aceptar       Continuar
+    '        2                 Descartar    Error         Aceptar       Aceptar
+    '--------------------------------------------------------------------------------
+    
+    'If (cantCargablesPorOrden > 0) And ((gradoCumplibleOrden = 1) Or (gradoCumplibleOrden = 2)) Then
+      Select Case gradoCumplibleOrden
+            Case -1
+                Select Case gradoCumplimientoOrdenComb
+                    Case -1: resultadoOrden = "Continuar"
+                    Case 0:  resultadoOrden = "Error"
+                    Case 1:  resultadoOrden = "Aceptar"
+                    Case 2:  resultadoOrden = "Continuar"
+                    Case Else: resultadoOrden = "Error"
+                End Select
+            Case 0
+               Select Case gradoCumplimientoOrdenComb
+                    Case -1: resultadoOrden = "Error"
+                    Case 0:  resultadoOrden = "Continuar"
+                    Case 1:  resultadoOrden = "Error"
+                    Case 2:  resultadoOrden = "Error"
+                    Case Else: resultadoOrden = "Error"
+                End Select
+            Case 1
+                Select Case gradoCumplimientoOrdenComb
+                    Case -1: resultadoOrden = "Descartar"
+                    Case 0:  resultadoOrden = "Error"
+                    Case 1:  resultadoOrden = "Aceptar"
+                    Case 2:  resultadoOrden = "Continuar"
+                    Case Else: resultadoOrden = "Error"
+                End Select
+            Case 2
+                Select Case gradoCumplimientoOrdenComb
+                    Case -1: resultadoOrden = "Descartar"
+                    Case 0:  resultadoOrden = "Error"
+                    Case 1:  resultadoOrden = "Aceptar"
+                    Case 2:  resultadoOrden = "Aceptar"
+                    Case Else: resultadoOrden = "Error"
+                End Select
+            Case Else
+                resultadoOrden = "Error"
+        End Select
+
+        If resultadoOrden = "Aceptar" Then
+            DescarteFinal = False
+            Exit Function
+        ElseIf (resultadoOrden = "Descartar") Or (resultadoOrden = "Error") Then
+            DescarteFinal = True
+            Exit Function
+        End If
+        ' Si resultado es "Continuar", se pasa al siguiente criterio.
+        
+    'End If
+    '------------------------------------------------------------------------------
+    ' (3) Evaluación de ALTERNANCIA
+    ' Matriz para ALTERNANCIA (definida diferente):
+    '                           gradoCumplimientoAlternanciaComb
+    '                          -1           0             1             2
+    ' gradoCumplibleAlternancia
+    '       -1                 Continuar    Error         Aceptar       Continuar
+    '        0                 Error        Continuar     Error         Error
+    '        1                 Descartar    Error         Aceptar       Descartar
+    '        2                 Descartar    Error         Aceptar       Aceptar
+    '-------------------------------------------------------------------------------
+
+    Dim haySI As Boolean
+    Dim i     As Long
+    For i = LBound(alternanciaArticulos) To UBound(alternanciaArticulos)
+        If alternanciaArticulos(i) = "SI" Then
+            haySI = True: Exit For
+        End If
+    Next
+
+    If Not haySI Then
+        resultadoAlternancia = "No aplica"
+        DescarteFinal = False
+        Exit Function
+    End If
+
+    ' Si hay “SI”, se la matriz
+    'If cantCargablesPorAlternancia > 0 Then
+          Select Case gradoCumplibleAlternancia
+            Case -1
+                Select Case gradoCumplimientoAlternanciaComb
+                    Case -1: resultadoAlternancia = "Continuar"
+                    Case 0:  resultadoAlternancia = "Error"
+                    Case 1:  resultadoAlternancia = "Aceptar"
+                    Case 2:  resultadoAlternancia = "Continuar"
+                    Case Else: resultadoAlternancia = "Error"
+                End Select
+            Case 0
+               Select Case gradoCumplimientoAlternanciaComb
+                    Case -1: resultadoAlternancia = "Error"
+                    Case 0:  resultadoAlternancia = "Continuar"
+                    Case 1:  resultadoAlternancia = "Error"
+                    Case 2:  resultadoAlternancia = "Error"
+                    Case Else: resultadoAlternancia = "Error"
+                End Select
+            Case 1
+                Select Case gradoCumplimientoAlternanciaComb
+                    Case -1: resultadoAlternancia = "Descartar"
+                    Case 0:  resultadoAlternancia = "Error"
+                    Case 1:  resultadoAlternancia = "Aceptar"
+                    Case 2:  resultadoAlternancia = "Descartar"
+                    Case Else: resultadoAlternancia = "Error"
+                End Select
+            Case 2
+                Select Case gradoCumplimientoAlternanciaComb
+                    Case -1: resultadoAlternancia = "Descartar"
+                    Case 0:  resultadoAlternancia = "Error"
+                    Case 1:  resultadoAlternancia = "Aceptar"
+                    Case 2:  resultadoAlternancia = "Aceptar"
+                    Case Else: resultadoAlternancia = "Error"
+                End Select
+            Case Else
+                resultadoAlternancia = "Error"
+        End Select
+
+        If (resultadoAlternancia = "Descartar") Or (resultadoAlternancia = "Error") Then
+            DescarteFinal = True
+            Exit Function
+        Else
+            DescarteFinal = False
+            Exit Function
+        End If
+        ' Si resultado es "Continuar", se pasa al siguiente criterio.
+    'End If
+    
+    '---------------------------------------------
+    ' Si no hay demanda en ninguno de los criterios, se procesa la combinación.
+    '---------------------------------------------
+    DescarteFinal = False
+    Exit Function
+
+ErrHandler:
+    Debug.Print "Error en DescarteFinal: " & Err.Number & " - " & Err.Description
+    DescarteFinal = True
+End Function
+
+
+'================================================================================
+' CumpleOrdenComb: evalúa UNA sola combinación (ya válida en Pmin/Pmax/compat…)
+' Grados:
+'   0 = no hay demanda activa
+'  -1 = hay demanda pero no carga nada de los top
+'   1 = óptimo/estricto
+'   2 = parcial (carga al menos 1 del top, pero no es grado 1)
+'================================================================================
+Public Function CumpleOrdenComb( _
+    ByRef combinacion As Variant, _
+    ByRef CargablesPorOrden As Variant, _
+    ByVal cantCargablesPorOrden As Long, _
+    ByRef ordencarga As Variant, _
+    ByRef ordenesPrioritarias As Variant, _
+    ByVal numCamion As Long _
+) As Long
+
+    Dim p As Long, n As Long
+    n = UBound(CargablesPorOrden)
+    
+    ' 1. Grado 0: Si no existe demanda global (ningún artículo activo)
+    Dim totalDemand As Long
+    totalDemand = 0
+    For p = 1 To n
+        If CargablesPorOrden(p) > 0 Then
+            totalDemand = totalDemand + CargablesPorOrden(p)
+        End If
+    Next p
+    If totalDemand = 0 Then
+        ' No hay demanda, se retorna grado 0.
+        CumpleOrdenComb = 0
+        Exit Function
+    End If
+    
+    ' 2. Determinar el grupo de mayor prioridad (top group)
+    Dim minOrd As Long
+    minOrd = 999999
+    For p = 1 To n
+        If CargablesPorOrden(p) > 0 Then
+            If ordencarga(1, p) > 0 Then
+                If ordencarga(1, p) < minOrd Then
+                    minOrd = ordencarga(1, p)
+                End If
+            End If
+        End If
+    Next p
+    
+    ' 3. Asegurarse de cargar al menos una unidad en el grupo top.
+    Dim topLoad As Long
+    topLoad = 0
+    For p = 1 To n
+        If CargablesPorOrden(p) > 0 Then
+            If ordencarga(1, p) = minOrd Then
+                topLoad = topLoad + combinacion(p - 1)
+            End If
+        End If
+    Next p
+    If topLoad = 0 Then
+        CumpleOrdenComb = -1
+        Exit Function
+    End If
+    
+    ' 4. Probar las dos opciones para obtener Grado 1.
+    Dim optionA As Boolean, optionB As Boolean
+    optionA = True
+    optionB = True
+    
+    ' Opción A:
+    ' La combinación carga SOLO artículos con activo (cargablesPorOrden > 0),
+    ' y dichos artículos deben provenir exclusivamente del grupo top,
+    ' con cantidad asignada <= la requerida.
+    For p = 1 To n
+        If combinacion(p - 1) > 0 Then
+            ' Si se carga en un artículo sin orden activo, falla.
+            If CargablesPorOrden(p) <= 0 Then optionA = False
+            ' Si el artículo cargado no pertenece al grupo top, falla.
+            If ordencarga(1, p) <> minOrd Then optionA = False
+            ' Se debe cumplir que la carga asignada NO supere el requerimiento.
+            If combinacion(p - 1) > CargablesPorOrden(p) Then optionA = False
+        End If
+    Next p
+
+    ' Opción B:
+    ' La combinación debe saturar la demanda de TODOS los artículos activos;
+    ' es decir, para todo artículo con cargablesPorOrden > 0,
+    ' la cantidad asignada debe ser >= el requerido, sin importar si se carga adicionalmente en otros.
+    For p = 1 To n
+        If CargablesPorOrden(p) > 0 Then
+            If combinacion(p - 1) < CargablesPorOrden(p) Then optionB = False
+        End If
+    Next p
+    
+    ' 5. Determinar el grado:
+    ' Si se cumple alguna de las opciones, se retorna Grado 1.
+    ' En caso contrario, se retorna Grado 2 (Parcial), pues se ha cargado al menos una unidad en el grupo top.
+    If optionA Or optionB Then
+        CumpleOrdenComb = 1
+    Else
+        CumpleOrdenComb = 2
+    End If
+
+End Function
+
+Function CumpleUrgentesComb( _
+    ByRef combinacion As Variant, _
+    ByRef urgentesCargablesCartera As Variant, _
+    ByVal cantUrgentesCartera As Long _
+) As Long
+    Dim p                    As Long
+    Dim totalUrgCargados     As Long
+    Dim hasNonUrg            As Boolean
+    Dim overUrg              As Boolean
+    Dim coversAllUrg         As Boolean
+
+    ' 0) Sin urgentes => grado 0
+    If cantUrgentesCartera = 0 Then
+        CumpleUrgentesComb = 0
+        Exit Function
+    End If
+
+    ' 1) Recorremos la combinación
+    totalUrgCargados = 0
+    hasNonUrg = False
+    overUrg = False
+
+    For p = LBound(combinacion) To UBound(combinacion)
+        If combinacion(p) > 0 Then
+            If urgentesCargablesCartera(p + 1) > 0 Then
+                totalUrgCargados = totalUrgCargados + combinacion(p)
+                ' detectamos sobrecarga de urgente
+                If combinacion(p) > urgentesCargablesCartera(p + 1) Then
+                    overUrg = True
+                End If
+            Else
+                hasNonUrg = True ' carga un artículo no urgente
+            End If
+        End If
+    Next p
+
+    ' 2) No carga nada de urgentes => grado -1
+    If totalUrgCargados = 0 Then
+        CumpleUrgentesComb = -1
+        Exit Function
+    End If
+
+    ' 3) ¿Cubre toda la demanda de *cada* urgente?
+    coversAllUrg = True
+    For p = LBound(combinacion) To UBound(combinacion)
+        If urgentesCargablesCartera(p + 1) > 0 Then
+            If combinacion(p) < urgentesCargablesCartera(p + 1) Then
+                coversAllUrg = False
+                Exit For
+            End If
+        End If
+    Next p
+
+    ' 4) Grado 1 – Óptimo/Estricto si se cumple alguno:
+    '    a) Puro:  SOLO urgentes y NINGUNA sobrecarga
+    '    b) Saturada: cubre *todas* las demandas urgentes (>= en cada p)
+    If (Not hasNonUrg And Not overUrg) Or coversAllUrg Then
+        CumpleUrgentesComb = 1
+        Exit Function
+    End If
+
+    ' 5) Grado 2 – Parcial: carga al menos un urgente, pero no cumple grado 1
+    CumpleUrgentesComb = 2
+End Function
+
+Public Function CumplealternanciaComb( _
+    ByRef combinacion As Variant, _
+    ByRef alternanciaArticulos As Variant, _
+    ByRef articulosCargadosEnCiclo As Variant, _
+    ByRef cargablesPorAlternancia As Variant _
+) As Long
+
+    Dim i                       As Long
+    Dim totalAlternable         As Long
+    Dim loadedAlternableCount   As Long
+    Dim strictOpt1              As Boolean
+    Dim strictOpt2              As Boolean
+
+    ' 1) Grado 0: no hay ningún artículo elegible para alternancia
+    totalAlternable = 0
+    For i = LBound(cargablesPorAlternancia) To UBound(cargablesPorAlternancia)
+        If alternanciaArticulos(i) = "SI" _
+           And cargablesPorAlternancia(i) > 0 Then
+            totalAlternable = totalAlternable + 1
+        End If
+    Next i
+    If totalAlternable = 0 Then
+        CumplealternanciaComb = 0
+        Exit Function
+    End If
+
+    ' 2) Contar cuántos alternables carga la combinación
+    loadedAlternableCount = 0
+    For i = LBound(combinacion) To UBound(combinacion)
+        If combinacion(i) > 0 _
+           And alternanciaArticulos(i + 1) = "SI" _
+           And cargablesPorAlternancia(i + 1) > 0 Then
+            loadedAlternableCount = loadedAlternableCount + 1
+        End If
+    Next i
+
+    ' 3) Grado -1: hay alternables elegibles pero la combinación no carga ninguno
+    If loadedAlternableCount = 0 Then
+        CumplealternanciaComb = -1
+        Exit Function
+    End If
+
+    ' 4) Grado 1 (Óptimo/Estricto)
+
+    ' 4a) Estricto tipo 1:
+    '     - Sólo carga artículos con cargablesPorAlternancia>0
+    '     - Carga = cargablesPorAlternancia de cada uno
+    '     - No carga artículos ya en articulosCargadosEnCiclo
+    strictOpt1 = True
+    For i = LBound(combinacion) To UBound(combinacion)
+        If combinacion(i) > 0 Then
+            ' Debe ser alternable y dentro de su tope
+            If alternanciaArticulos(i + 1) <> "SI" _
+               Or combinacion(i) > cargablesPorAlternancia(i + 1) Then
+                strictOpt1 = False
+                Exit For
+            End If
+            ' No puede cargar nada ya presente en ciclo
+            If articulosCargadosEnCiclo(i + 1) > 0 Then
+                strictOpt1 = False
+                Exit For
+            End If
+        End If
+    Next i
+
+    If strictOpt1 Then
+        CumplealternanciaComb = 1
+        Exit Function
+    End If
+
+    ' 4b) Estricto tipo 2:
+    '     - Carga = cargablesPorAlternancia de CADA artículo alternable
+    strictOpt2 = True
+    For i = LBound(cargablesPorAlternancia) To UBound(cargablesPorAlternancia)
+        If alternanciaArticulos(i) = "SI" _
+           And cargablesPorAlternancia(i) > 0 Then
+            If combinacion(i - 1) < cargablesPorAlternancia(i) Then
+                strictOpt2 = False
+                Exit For
+            End If
+        End If
+    Next i
+
+    If strictOpt2 Then
+        CumplealternanciaComb = 1
+        Exit Function
+    End If
+
+    ' 5) Grado 2: parcial — carga al menos una unidad de un alternable viable
+    CumplealternanciaComb = 2
+
+End Function
+
+'-------------------------------------------------
+' Función MergeFams: Une dos cadenas de familias (índices) sin duplicados y ordenadas.
+'-------------------------------------------------
+Public Function MergeFams(f1 As String, f2 As String) As String
+    Dim dictF As Object
+    Set dictF = CreateObject("Scripting.Dictionary")
+    Dim arr() As String, item As Variant
+    If f1 <> "" Then
+        arr = Split(f1, ",")
+        For Each item In arr
+            If Not dictF.exists(item) Then dictF.Add item, True
+        Next item
+    End If
+    If f2 <> "" Then
+        arr = Split(f2, ",")
+        For Each item In arr
+            If Not dictF.exists(item) Then dictF.Add item, True
+        Next item
+    End If
+    Dim keys() As Variant
+    keys = dictF.keys
+    Dim i As Long, j As Long, temp As Variant
+    For i = LBound(keys) To UBound(keys) - 1
+        For j = i + 1 To UBound(keys)
+            If CLng(keys(i)) > CLng(keys(j)) Then
+                temp = keys(i)
+                keys(i) = keys(j)
+                keys(j) = temp
+            End If
+        Next j
+    Next i
+    MergeFams = Join(keys, ",")
+End Function
+
+'-------------------------------------------------
+' Función IsCompatible: Revisa la compatibilidad de la cadena de familias
+' según la matriz de combinaciones permitidas.
+'-------------------------------------------------
+Public Function IsCompatible(famStr As String, combinacionesPermitidas As Variant) As Boolean
+    If famStr = "" Then
+        IsCompatible = True
+        Exit Function
+    End If
+    Dim arr() As String
+    arr = Split(famStr, ",")
+    Dim n As Long
+    n = UBound(arr) - LBound(arr) + 1
+    If n < 2 Then
+        IsCompatible = True
+        Exit Function
+    End If
+    Dim i As Long, j As Long, idx1 As Long, idx2 As Long
+    For i = LBound(arr) To UBound(arr) - 1
+        idx1 = CLng(arr(i))
+        For j = i + 1 To UBound(arr)
+            idx2 = CLng(arr(j))
+            If Not CBool(combinacionesPermitidas(idx1, idx2)) Then
+                IsCompatible = False
+                Exit Function
+            End If
+        Next j
+    Next i
+    IsCompatible = True
+End Function
+
+'-------------------------------------------------
+' Función EstimarAltura: Estima la altura de una cantidad de un artículo
+'-------------------------------------------------
+Public Function EstimarAltura(ByVal p As Long, ByVal cantidad As Long, ByRef alturas As Variant, _
+    ByRef familias As Variant, ByVal MaxPaqCapa As Long) As Double
+    Select Case familias(1, p)
+        Case "MALLA"
+            EstimarAltura = Application.Ceiling(cantidad / 2, 1) * alturas(1, p)
+        Case Else
+            Dim numCapas As Long
+            numCapas = Application.Ceiling(cantidad / MaxPaqCapa, 1)
+            EstimarAltura = Application.Min(2, numCapas) * alturas(1, p)
+    End Select
+End Function
+
+'================================================================================
+' Estima altura total de los articulos de una combinación
+'================================================================================
+Public Function EstimarAlturaGlobal(numCamion As Long, combinacion As Variant, _
+                                    alturas As Variant, familias As Variant, _
+                                    MaxPaqCap As Variant, _
+                                    numArticulos As Long) As Double
+
+    Dim artIdx As Long, baseIdx As Long
+    Dim nombreFam As String, unidades As Long, altUni As Double
+    Dim famIdx As Long, numCapas As Long, alturaTotal As Double
+
+    alturaTotal = 0
+    baseIdx = LBound(combinacion)
+ 
+    ' Debug.Print "combinacion = (" & Join(combinacion, ",") & ")"
+ 
+    For artIdx = 1 To numArticulos
+        nombreFam = CStr(familias(1, artIdx))
+        unidades = combinacion(baseIdx + artIdx - 1)
+        altUni = alturas(1, artIdx)
+        famIdx = artIdx
+        If unidades > 0 Then
+            If UCase(nombreFam) = "MALLA" Then
+                numCapas = (unidades + 1) \ 2
+            Else
+                numCapas = (unidades + MaxPaqCap(artIdx)) \ MaxPaqCap(artIdx)
+            End If
+
+            alturaTotal = alturaTotal + numCapas * altUni
+
+            'If numCamion = 17 Then
+            '    Debug.Print "Artículo " & artIdx & _
+                            " — familia=" & nombreFam & _
+                            ", unidades=" & unidades & _
+                            ", altura unidad=" & altUni & _
+                            ", capas=" & numCapas & _
+                            ", aporte altura=" & (numCapas * altUni)
+            'End If
+        End If
+    Next
+
+    EstimarAlturaGlobal = alturaTotal
+
+    'If numCamion = 17 Then
+        'Debug.Print ">>> AlturaGlobal FINAL = " & alturaTotal
+    'End If
+End Function
+
+'—————————————————————————————
+' Helper para convertir array a Variant()
+'—————————————————————————————
+Private Function FormatArray(arr As Variant) As Variant
+    ' Simplemente devuelve arr como Variant() para usar Join
+    FormatArray = arr
+End Function
+
+'-----------------------------------------------------------------------------------------
+' Helper: cambia un variant 1D =(p) o fila 2D=(1,p) a string para poder imprtimirlo mediante join
+'-----------------------------------------------------------------------------------------
+Private Function JoinVec(v As Variant) As String
+    Dim s As String, i As Long
+    Dim is2D As Boolean
+    On Error Resume Next
+    is2D = (UBound(v, 2) >= LBound(v, 2))
+    If Err.Number <> 0 Then Err.Clear: is2D = False
+    On Error GoTo 0
+
+    If is2D Then
+        For i = LBound(v, 2) To UBound(v, 2)
+            s = s & v(1, i) & ","
+        Next
+    Else
+        For i = LBound(v) To UBound(v)
+            s = s & v(i) & ","
+        Next
+    End If
+
+    If Len(s) > 0 Then s = Left$(s, Len(s) - 1)
+    JoinVec = s
+End Function
+
+
+'================================================================================
+' 1) Verifica jerarquía de órdenes (1D o 2D)
+'================================================================================
+Private Function EsJerarquiaValida(numCamion As Long, vec As Variant, _
+                                  prioridades As Variant, cargMax As Variant, _
+                                  numArticulos As Long) As Boolean
+    Dim i As Long, j As Long, lo As Long, hi As Long
+    Dim is1D As Boolean, pj As Long, pi As Long
+
+    On Error Resume Next
+        pj = prioridades(1, 1)
+        is1D = (Err.Number <> 0)
+    Err.Clear: On Error GoTo 0
+
+    If is1D Then
+        lo = LBound(prioridades): hi = UBound(prioridades)
+    Else
+        lo = LBound(prioridades, 2): hi = UBound(prioridades, 2)
+    End If
+
+    For j = 1 To numArticulos
+        If vec(j) > 0 Then
+            pj = 0
+            If j >= lo And j <= hi Then
+                If is1D Then
+                    pj = prioridades(j)
+                Else
+                    pj = prioridades(1, j)
+                End If
+            End If
+            If pj > 0 Then
+                For i = 1 To numArticulos
+                    If vec(i) < cargMax(i) Then
+                        pi = 0
+                        If i >= lo And i <= hi Then
+                            If is1D Then
+                                pi = prioridades(i)
+                            Else
+                                pi = prioridades(1, i)
+                            End If
+                        End If
+                        If pi > 0 And pi < pj Then Exit Function
+                    End If
+                Next
+            End If
+        End If
+    Next
+    EsJerarquiaValida = True
+End Function
+'————————————————————————————————————
+' Utilidad: convierte Collection de Long en array de String
+'————————————————————————————————————
+Private Function CollectionToArray(col As Collection) As Variant
+    Dim arr() As String
+    ReDim arr(1 To col.Count)
+    Dim i As Long, v As Variant
+    i = 1
+    For Each v In col
+        arr(i) = CStr(v)
+        i = i + 1
+    Next
+    CollectionToArray = arr
+End Function
+
+'————————————————————————————————————
+' 3) Quicksort descendente por wUnit
+'————————————————————————————————————
+Private Sub QuickSortAlt( _
+    ByRef a() As Alternante, _
+    ByVal lo As Long, _
+    ByVal hi As Long _
+)
+    Dim i As Long, j As Long
+    Dim pivot As Alternante, tmp As Alternante
+
+    i = lo: j = hi: pivot = a((lo + hi) \ 2)
+    Do While i <= j
+        Do While a(i).wUnit > pivot.wUnit: i = i + 1: Loop
+        Do While a(j).wUnit < pivot.wUnit: j = j - 1: Loop
+        If i <= j Then
+            tmp = a(i): a(i) = a(j): a(j) = tmp
+            i = i + 1: j = j - 1
+        End If
+    Loop
+    If lo < j Then QuickSortAlt a, lo, j
+    If i < hi Then QuickSortAlt a, i, hi
+End Sub
+
+
+'————————————————————————————————————
+' Función ayuda para imprimir arrays de Variant/Long/String
+'————————————————————————————————————
+Private Function ArrayToCSV(arr As Variant) As String
+    Dim i As Long, s As String
+    If Not IsArray(arr) Then Exit Function
+    For i = LBound(arr) To UBound(arr)
+        s = s & CStr(arr(i)) & ","
+    Next
+    If Len(s) > 0 Then s = Left(s, Len(s) - 1)
+    ArrayToCSV = s
+End Function
+
+'————————————————————————————————————
+' Comprueba compatibilidad de familias en tmpVec
+'————————————————————————————————————
+Private Function EsCompatiblePure( _
+    tmpVec As Variant, _
+    familias As Variant, _
+    dict As Object, _
+    combOK As Variant _
+) As Boolean
+    Dim i As Long, j As Long
+    Dim idxI As Long, idxJ As Long
+
+    EsCompatiblePure = True
+    For i = LBound(tmpVec) To UBound(tmpVec)
+        If tmpVec(i) > 0 Then
+            idxI = dict(familias(1, i))
+            For j = i + 1 To UBound(tmpVec)
+                If tmpVec(j) > 0 Then
+                    idxJ = dict(familias(1, j))
+                    If combOK(idxI, idxJ) = 0 Or combOK(idxJ, idxI) = 0 Then
+                        EsCompatiblePure = False
+                        Exit Function
+                    End If
+                End If
+            Next
+        End If
+    Next
+End Function
+
+'————————————————————————————————————
+' Función principal: grados 0,1a,1b,2 de urgentes
+'————————————————————————————————————
+Public Function CumplibleUrgentes( _
+    numCamion As Long, numArticulos As Long, _
+    pesos As Variant, alturas As Variant, _
+    familias As Variant, MaxPaqCap As Variant, _
+    dict As Object, combinacionesPermitidas As Variant, _
+    urgentesCargablesCartera As Variant, _
+    cantUrgentesCargablesCartera As Long, _
+    noUrgentesCargables As Variant, ordencarga As Variant, _
+    Pmin As Double, Pmax As Double, _
+    Altmax As Double, MaxX As Variant, _
+    ByRef ReservaCumplibleUrgentes As Variant _
+) As Long
+    Dim sol()     As Long
+    Dim bestSol() As Long
+    Dim grado     As Long
+
+    '' If numCamion = 15 Then Debug.Print ">> START CumplibleUrgentes (camión 5)"
+    If cantUrgentesCargablesCartera = 0 Then
+        CumplibleUrgentes = 0
+        Exit Function
+    End If
+
+    ReDim sol(1 To numArticulos)
+    ReDim bestSol(1 To numArticulos)
+
+    ' Grado 1a pura
+    grado = RecPura( _
+        numCamion, numArticulos, pesos, alturas, _
+        familias, MaxPaqCap, _
+        dict, combinacionesPermitidas, urgentesCargablesCartera, ordencarga, _
+        Pmin, Pmax, Altmax, sol, bestSol _
+    )
+    If grado = 1 Then
+        ReservaCumplibleUrgentes = bestSol
+        CumplibleUrgentes = 1
+        '' If numCamion = 15 Then Debug.Print ">> RETURN 1 PURA:", ArrayToCSV(bestSol)
+        Exit Function
+    End If
+
+    ' Grado 1b mixta
+    grado = RecMixta( _
+        numCamion, numArticulos, pesos, alturas, _
+        familias, MaxPaqCap, _
+        dict, combinacionesPermitidas, urgentesCargablesCartera, _
+        noUrgentesCargables, ordencarga, MaxX, _
+        Pmin, Pmax, Altmax, sol, bestSol _
+    )
+    If grado = 1 Then
+        ReservaCumplibleUrgentes = bestSol
+        CumplibleUrgentes = 1
+        '' If numCamion = 15 Then Debug.Print ">> RETURN 1 MIXTA:", ArrayToCSV(bestSol)
+        Exit Function
+    End If
+
+    ' Grado 2 completo
+    grado = RecGrado2( _
+        numCamion, numArticulos, pesos, alturas, _
+        familias, MaxPaqCap, _
+        dict, combinacionesPermitidas, urgentesCargablesCartera, ordencarga, _
+        MaxX, Pmin, Pmax, Altmax, sol, bestSol _
+    )
+    If grado = 2 Then
+        ReservaCumplibleUrgentes = bestSol
+        CumplibleUrgentes = 2
+        ' If numCamion = 15 Then Debug.Print ">> RETURN 2:", ArrayToCSV(bestSol)
+    Else
+        CumplibleUrgentes = -1
+        '' If numCamion = 15 Then Debug.Print ">> RETURN -1"
+    End If
+End Function
+'————————————————————————————————————
+' RecPura: solo urgentes [0…U(i)]
+'————————————————————————————————————
+Public Function RecPura( _
+    numCamion As Long, numArticulos As Long, _
+    pesos As Variant, alturas As Variant, _
+    familias As Variant, MaxPaqCap As Variant, _
+    dict As Object, combinacionesPermitidas As Variant, _
+    urgentesCargablesCartera As Variant, ordencarga As Variant, _
+    Pmin As Double, Pmax As Double, Altmax As Double, _
+    ByRef sol() As Long, ByRef bestSol() As Long _
+) As Long
+    Dim cand() As Long, maxU() As Long
+    Dim i As Long, m As Long, found As Boolean
+
+    ' If numCamion = 15 Then Debug.Print "  RecPura ENTER"
+    For i = 1 To numArticulos
+        If urgentesCargablesCartera(i) > 0 Then
+            m = m + 1
+            ReDim Preserve cand(1 To m), maxU(1 To m)
+            cand(m) = i
+            maxU(m) = urgentesCargablesCartera(i)
+        End If
+    Next
+    If m = 0 Then
+        RecPura = 0: Exit Function
+    End If
+
+    Call PuraRecAll( _
+        1, 0#, False, cand, maxU, m, _
+        numCamion, numArticulos, pesos, alturas, familias, _
+        MaxPaqCap, _
+        dict, combinacionesPermitidas, urgentesCargablesCartera, ordencarga, _
+        Pmin, Pmax, Altmax, sol, bestSol, found _
+    )
+    RecPura = IIf(found, 1, -1)
+    '' If numCamion = 15 Then Debug.Print "  RecPura RETURNS", RecPura
+End Function
+
+Private Sub PuraRecAll( _
+    idx As Long, pesoAc As Double, urgenteUsada As Boolean, _
+    cand As Variant, maxU As Variant, m As Long, _
+    numCamion As Long, numArticulos As Long, _
+    pesos As Variant, alturas As Variant, familias As Variant, _
+    MaxPaqCap As Variant, dict As Object, combinacionesPermitidas As Variant, _
+    urgentesCargablesCartera As Variant, ordencarga As Variant, _
+    Pmin As Double, Pmax As Double, Altmax As Double, _
+    sol As Variant, bestSol As Variant, ByRef found As Boolean _
+)
+    Dim j As Long, remMax As Double, newPeso As Double
+    Dim iArt As Long, u As Long
+
+    If found Then Exit Sub
+    For j = idx To m
+        remMax = remMax + maxU(j) * pesos(1, cand(j))
+    Next
+    If pesoAc + remMax < Pmin Then Exit Sub
+
+    If idx > m Then
+        ' If numCamion = 15 Then Debug.Print "    PURA CAND:", ArrayToCSV(sol)
+        If Not urgenteUsada Or pesoAc < Pmin Or pesoAc > Pmax Then Exit Sub
+        If EstimarAlturaGlobal( _
+            numCamion, sol, alturas, familias, _
+            MaxPaqCap, numArticulos _
+        ) > Altmax Then Exit Sub
+        If Not EsCompatiblePure(sol, familias, dict, combinacionesPermitidas) Then Exit Sub
+        If Not EsJerarquiaValida( _
+            numCamion, sol, ordencarga, urgentesCargablesCartera, numArticulos _
+        ) Then Exit Sub
+
+        ' If numCamion = 15 Then Debug.Print "    PURA ACEP:", ArrayToCSV(sol)
+        For j = 1 To numArticulos: bestSol(j) = sol(j): Next
+        found = True: Exit Sub
+    End If
+
+    iArt = cand(idx)
+    For u = 0 To maxU(idx)
+        newPeso = pesoAc + u * pesos(1, iArt)
+        If newPeso > Pmax Then Exit For
+        sol(iArt) = u
+        If u > 0 And u <= urgentesCargablesCartera(iArt) Then urgenteUsada = True
+        If Not EsCompatiblePure(sol, familias, dict, combinacionesPermitidas) Then
+            sol(iArt) = 0: GoTo NextP
+        End If
+        PuraRecAll idx + 1, newPeso, urgenteUsada, cand, maxU, m, _
+                   numCamion, numArticulos, pesos, alturas, familias, _
+                   MaxPaqCap, _
+                   dict, combinacionesPermitidas, urgentesCargablesCartera, ordencarga, _
+                   Pmin, Pmax, Altmax, sol, bestSol, found
+NextP:
+        sol(iArt) = 0
+    Next
+End Sub
+
+'————————————————————————————————————
+' RecMixta: urgentes [U(i)…MaxX(i)], no urgentes [0…MaxX]
+'————————————————————————————————————
+Public Function RecMixta( _
+    numCamion As Long, numArticulos As Long, _
+    pesos As Variant, alturas As Variant, _
+    familias As Variant, MaxPaqCap, _
+    dict As Object, combinacionesPermitidas As Variant, _
+    urgentesCargablesCartera As Variant, noUrgentesCargables As Variant, _
+    ordencarga As Variant, MaxX As Variant, _
+    Pmin As Double, Pmax As Double, Altmax As Double, _
+    ByRef sol() As Long, ByRef bestSol() As Long _
+) As Long
+    Dim cand() As Long, minU() As Long, maxU() As Long
+    Dim i As Long, found As Boolean
+
+    ' If numCamion = 15 Then Debug.Print "  RecMixta ENTER"
+    ReDim cand(1 To numArticulos), minU(1 To numArticulos), maxU(1 To numArticulos)
+    For i = 1 To numArticulos
+        cand(i) = i
+        minU(i) = urgentesCargablesCartera(i)
+        maxU(i) = MaxX(i)
+    Next
+
+    Call MixRecAll( _
+        1, 0#, False, cand, minU, maxU, numArticulos, _
+        numCamion, numArticulos, pesos, alturas, familias, _
+        MaxPaqCap, _
+        dict, combinacionesPermitidas, ordencarga, _
+        urgentesCargablesCartera, noUrgentesCargables, _
+        Pmin, Pmax, Altmax, sol, bestSol, found _
+    )
+    RecMixta = IIf(found, 1, -1)
+    ' If numCamion = 15 Then Debug.Print "  RecMixta RETURNS", RecMixta
+End Function
+
+Private Sub MixRecAll( _
+    idx As Long, pesoAc As Double, urgenteUsada As Boolean, _
+    cand As Variant, minU As Variant, maxU As Variant, m As Long, _
+    numCamion As Long, numArticulos As Long, pesos As Variant, _
+    alturas As Variant, familias As Variant, _
+    MaxPaqCap As Variant, dict As Object, combinacionesPermitidas As Variant, _
+    ordencarga As Variant, urgentesCargablesCartera As Variant, _
+    noUrgentesCargables As Variant, Pmin As Double, _
+    Pmax As Double, Altmax As Double, sol As Variant, _
+    bestSol As Variant, ByRef found As Boolean _
+)
+    Dim j As Long, remMax As Double, newPeso As Double
+    Dim iArt As Long, u As Long
+    Dim prevUrgente As Boolean
+
+    If found Then Exit Sub
+
+    remMax = 0
+    For j = idx To m
+        remMax = remMax + maxU(j) * pesos(1, cand(j))
+    Next
+    If pesoAc + remMax < Pmin Then Exit Sub
+
+    If idx > m Then
+        ' If numCamion = 15 Then Debug.Print "    MIX CAND:", ArrayToCSV(sol)
+        If Not urgenteUsada Or pesoAc < Pmin Or pesoAc > Pmax Then Exit Sub
+        If EstimarAlturaGlobal(numCamion, sol, alturas, familias, _
+            MaxPaqCap, numArticulos) > Altmax Then Exit Sub
+        If Not EsCompatiblePure(sol, familias, dict, combinacionesPermitidas) Then Exit Sub
+        If Not EsJerarquiaValida(numCamion, sol, ordencarga, urgentesCargablesCartera, numArticulos) Then Exit Sub
+
+        ' If numCamion = 15 Then Debug.Print "    MIX ACEP:", ArrayToCSV(sol)
+        For j = 1 To numArticulos
+            bestSol(j) = sol(j)
+        Next
+        found = True
+        Exit Sub
+    End If
+
+    iArt = cand(idx)
+    For u = minU(idx) To maxU(idx)
+        prevUrgente = urgenteUsada
+
+        newPeso = pesoAc + u * pesos(1, iArt)
+        If newPeso > Pmax Then
+            urgenteUsada = prevUrgente
+            Exit For
+        End If
+
+        sol(iArt) = u
+        If u > 0 And u <= urgentesCargablesCartera(iArt) Then urgenteUsada = True
+
+        If Not EsCompatiblePure(sol, familias, dict, combinacionesPermitidas) Then
+            sol(iArt) = 0
+            urgenteUsada = prevUrgente
+            GoTo NextM
+        End If
+
+        MixRecAll idx + 1, newPeso, urgenteUsada, cand, minU, maxU, m, _
+                  numCamion, numArticulos, pesos, alturas, familias, _
+                  MaxPaqCap, _
+                  dict, combinacionesPermitidas, ordencarga, _
+                  urgentesCargablesCartera, noUrgentesCargables, _
+                  Pmin, Pmax, Altmax, sol, bestSol, found
+
+NextM:
+        sol(iArt) = 0
+        urgenteUsada = prevUrgente
+    Next u
+End Sub
+
+
+'————————————————————————————————————
+' RecGrado2: completo [0…MaxX] con =1 urgente
+'————————————————————————————————————
+Private Sub Grade2RecAll( _
+    idx As Long, pesoAc As Double, urgenteUsada As Boolean, _
+    cand As Variant, maxU As Variant, m As Long, _
+    numCamion As Long, numArticulos As Long, pesos As Variant, _
+    alturas As Variant, familias As Variant, MaxPaqCap As Variant, dict As Object, _
+    combinacionesPermitidas As Variant, ordencarga As Variant, urgentesCargablesCartera As Variant, _
+    Pmin As Double, Pmax As Double, Altmax As Double, _
+    sol As Variant, bestSol As Variant, ByRef found As Boolean _
+)
+    Dim j           As Long
+    Dim remMax      As Double
+    Dim newPeso     As Double
+    Dim iArt, u     As Long
+    Dim prevUrgente As Boolean
+    Dim alturaAc    As Double
+    Dim compOK      As Boolean
+    'Dim jerOK       As Boolean
+
+    If found Then Exit Sub
+
+    '----- Poda por remanente
+    remMax = 0
+    For j = idx To m
+        remMax = remMax + maxU(j) * pesos(1, cand(j))
+    Next j
+    If pesoAc + remMax < Pmin Then Exit Sub
+
+    '----- Caso base
+    If idx > m Then
+        alturaAc = EstimarAlturaGlobal( _
+            numCamion, sol, alturas, familias, _
+            MaxPaqCap, numArticulos _
+        )
+        compOK = EsCompatiblePure(sol, familias, dict, combinacionesPermitidas)
+        'jerOK = EsJerarquiaValida(numCamion, sol, ordencarga, urgentesCargablesCartera, numArticulos)
+
+        ' Detección de combinaciones manuales
+        'Select Case ArrayToCSV(sol)
+        '  Case "2,0,0,19,0,0,0", "2,0,10,0,0,0,0", "2,11,0,0,0,0,0"
+        '    Debug.Print "??? Generada:", ArrayToCSV(sol)
+        '    Debug.Print "   PesoAc=", Format(pesoAc, "0.00"), "OKPeso=", (pesoAc >= Pmin And pesoAc <= Pmax)
+        '    Debug.Print "   AlturaAc=", Format(alturaAc, "0.00"), "OKAlt=", (alturaAc <= Altmax)
+        '    Debug.Print "   UrgenteUsada=", urgenteUsada
+        '    Debug.Print "   Compatibilidad=", compOK
+        '    Debug.Print "   Jerarquía=", jerOK
+        'End Select
+
+        ' Filtros finales
+        If Not urgenteUsada Then Exit Sub
+        If pesoAc < Pmin Or pesoAc > Pmax Then Exit Sub
+        If alturaAc > Altmax Then Exit Sub
+        If Not compOK Then Exit Sub
+        'If Not jerOK Then Exit Sub
+
+        ' Aceptada
+        'If numCamion = 2 Then
+        '    Debug.Print "    GR2 ACEP:", ArrayToCSV(sol)
+        'End If
+        For j = 1 To numArticulos
+            bestSol(j) = sol(j)
+        Next j
+        found = True
+        Exit Sub
+    End If
+
+    '----- Recursión
+    iArt = cand(idx)
+    For u = 0 To maxU(idx)
+        prevUrgente = urgenteUsada
+        newPeso = pesoAc + u * pesos(1, iArt)
+        If newPeso > Pmax Then
+            urgenteUsada = prevUrgente
+            Exit For
+        End If
+
+        sol(iArt) = u
+        If u > 0 And urgentesCargablesCartera(iArt) > 0 Then
+            urgenteUsada = True
+        End If
+
+        ' Poda temprana de compatibilidad
+        If Not EsCompatiblePure(sol, familias, dict, combinacionesPermitidas) Then
+            sol(iArt) = 0
+            urgenteUsada = prevUrgente
+            GoTo NextIter
+        End If
+
+        Grade2RecAll _
+          idx + 1, newPeso, urgenteUsada, _
+          cand, maxU, m, _
+          numCamion, numArticulos, pesos, _
+          alturas, familias, MaxPaqCap, dict, _
+          combinacionesPermitidas, ordencarga, urgentesCargablesCartera, _
+          Pmin, Pmax, Altmax, _
+          sol, bestSol, found
+
+NextIter:
+        sol(iArt) = 0
+        urgenteUsada = prevUrgente
+    Next u
+End Sub
+
+Public Function RecGrado2( _
+    numCamion As Long, numArticulos As Long, _
+    pesos As Variant, alturas As Variant, familias As Variant, _
+    MaxPaqCap As Variant, dict As Object, combinacionesPermitidas As Variant, _
+    urgentesCargablesCartera As Variant, ordencarga As Variant, _
+    MaxX As Variant, Pmin As Double, Pmax As Double, Altmax As Double, _
+    ByRef sol() As Long, ByRef bestSol() As Long _
+) As Long
+
+    Dim cand() As Long, maxU() As Long
+    Dim i As Long, found As Boolean
+
+    'If numCamion = 2 Then
+    '    Debug.Print "  RecGrado2 ENTER"
+    '    Debug.Print "??? Detectada combinación manual en backtracking:", ArrayToCSV(sol)
+    'End If
+    'If ArrayToCSV(sol) = "2,0,0,19,0,0,0" Or ArrayToCSV(sol) = "2,0,10,0,0,0,0" Or ArrayToCSV(sol) = "2,11,0,0,0,0,0" Then
+    '    Debug.Print "??? Detectada combinación manual en backtracking:", ArrayToCSV(sol)
+    'End If
+    
+    ReDim cand(1 To numArticulos)
+    ReDim maxU(1 To numArticulos)
+
+    For i = 1 To numArticulos
+        cand(i) = i
+        maxU(i) = MaxX(i)
+    Next i
+
+    Grade2RecAll _
+        1, 0#, False, cand, maxU, numArticulos, _
+        numCamion, numArticulos, pesos, alturas, familias, _
+        MaxPaqCap, _
+        dict, combinacionesPermitidas, ordencarga, _
+        urgentesCargablesCartera, Pmin, Pmax, Altmax, _
+        sol, bestSol, found
+
+    RecGrado2 = IIf(found, 2, -1)
+
+    'If numCamion = 2 Then
+    '    Debug.Print "  RecGrado2 RETURNS", RecGrado2
+    'End If
+
+End Function
+'===============================================================
+' Copia sol() en bestSol()
+'===============================================================
+Public Sub CopySolution( _
+    ByRef sol As Variant, _
+    ByRef bestSol As Variant _
+)
+    Dim i As Long
+    For i = LBound(sol) To UBound(sol)
+        bestSol(i) = sol(i)
+    Next i
+End Sub
+
+'===============================================================
+' FACHADAS: envuelven tus RecPura, RecMixta y RecGrado2
+'===============================================================
+Public Function RecAlternanciaPura( _
+    ByVal numCamion As Long, _
+    ByVal numArticulos As Long, _
+    ByRef pesos As Variant, _
+    ByRef alturas As Variant, _
+    ByRef familias As Variant, _
+    ByRef MaxPaqCap As Variant, _
+    ByRef dict As Object, _
+    ByRef combinacionesPermitidas As Variant, _
+    ByRef cargablesPorAlt As Variant, _
+    ByRef ordencarga As Variant, _
+    ByVal Pmin As Double, _
+    ByVal Pmax As Double, _
+    ByVal Altmax As Double _
+) As Long
+
+    Dim sol()     As Long
+    Dim bestSol() As Long
+
+    ReDim sol(1 To numArticulos)
+    ReDim bestSol(1 To numArticulos)
+
+    RecAlternanciaPura = RecPura( _
+        numCamion, numArticulos, _
+        pesos, alturas, _
+        familias, MaxPaqCap, _
+        dict, combinacionesPermitidas, _
+        cargablesPorAlt, ordencarga, _
+        Pmin, Pmax, Altmax, _
+        sol, bestSol _
+    )
+End Function
+
+Public Function RecAlternanciaMixta( _
+    ByVal numCamion As Long, _
+    ByVal numArticulos As Long, _
+    ByRef pesos As Variant, _
+    ByRef alturas As Variant, _
+    ByRef familias As Variant, _
+    ByRef MaxPaqCap As Variant, _
+    ByRef dict As Object, _
+    ByRef combinacionesPermitidas As Variant, _
+    ByRef cargablesPorAlt As Variant, _
+    ByRef MaxX As Variant, _
+    ByRef ordencarga As Variant, _
+    ByVal Pmin As Double, _
+    ByVal Pmax As Double, _
+    ByVal Altmax As Double _
+) As Long
+
+    Dim sol()     As Long
+    Dim bestSol() As Long
+
+    ReDim sol(1 To numArticulos)
+    ReDim bestSol(1 To numArticulos)
+
+    RecAlternanciaMixta = RecMixta( _
+        numCamion, numArticulos, _
+        pesos, alturas, _
+        familias, MaxPaqCap, _
+        dict, combinacionesPermitidas, _
+        cargablesPorAlt, MaxX, _
+        ordencarga, MaxX, _
+        Pmin, Pmax, Altmax, _
+        sol, bestSol _
+    )
+End Function
+
+Public Function RecAlternanciaGrado2( _
+    ByVal numCamion As Long, _
+    ByVal numArticulos As Long, _
+    ByRef pesos As Variant, _
+    ByRef alturas As Variant, _
+    ByRef familias As Variant, _
+    ByRef MaxPaqCap As Variant, _
+    ByRef dict As Object, _
+    ByRef combinacionesPermitidas As Variant, _
+    ByRef cargablesPorAlt As Variant, _
+    ByRef ordencarga As Variant, _
+    ByRef MaxX As Variant, _
+    ByVal Pmin As Double, _
+    ByVal Pmax As Double, _
+    ByVal Altmax As Double _
+) As Long
+
+    Dim sol()     As Long
+    Dim bestSol() As Long
+
+    ReDim sol(1 To numArticulos)
+    ReDim bestSol(1 To numArticulos)
+
+    RecAlternanciaGrado2 = RecGrado2( _
+        numCamion, numArticulos, _
+        pesos, alturas, familias, _
+        MaxPaqCap, _
+        dict, combinacionesPermitidas, _
+        cargablesPorAlt, ordencarga, MaxX, _
+        Pmin, Pmax, Altmax, _
+        sol, bestSol _
+    )
+End Function
+
+'--------------------------------------------------
+' Comprueba alternancia en tres fases:
+'   0  = sin alternantes cargables
+'   1  = alternancia Grado 1 (pura o extendida)
+'   2  = alternancia Grado 2 (global)
+'  -1  = imposible
+'--------------------------------------------------
+'====================================================================================
+' FUNCIÓN CumplibleAlternancia - VERSIÓN CORREGIDA Y SIMPLIFICADA
+'====================================================================================
+Public Function CumplibleAlternancia( _
+    ByVal numCamion As Long, ByVal Pmin As Double, ByVal Pmax As Double, ByVal Altmax As Double, _
+    ByRef pesos As Variant, ByRef alturas As Variant, ByRef alternanciaArticulos As Variant, _
+    ByRef cargablesPorAlternancia As Variant, ByVal cantCargablesPorAlternancia As Long, _
+    ByRef MaxX As Variant, ByRef familias As Variant, ByRef dict As Object, _
+    ByRef combinacionesPermitidas As Variant, ByRef MaxPaqCap As Variant _
+) As Long
+    
+    ' --- Fase 0: Sin candidatos para alternancia ---
+    If cantCargablesPorAlternancia = 0 Then
+        CumplibleAlternancia = 0
+        Exit Function
+    End If
+
+    Dim i As Long, j As Long, k As Long
+    Dim numArticulos As Long: numArticulos = UBound(MaxX)
+    
+    ' --- Fase 1: Búsqueda de Grado 1 (Solución Ideal) ---
+    ' Buscamos una combinación válida usando SÓLO los artículos y cantidades
+    ' definidos en cargablesPorAlternancia.
+    
+    Dim articulosAlt() As Long, cantMaxAlt() As Long
+    Dim articulosNoAlt() As Long, cantMaxNoAlt() As Long
+    Dim nAlt As Long, nNoAlt As Long
+    
+    For i = 1 To numArticulos
+        If cargablesPorAlternancia(i) > 0 Then
+            nAlt = nAlt + 1
+            ReDim Preserve articulosAlt(1 To nAlt)
+            ReDim Preserve cantMaxAlt(1 To nAlt)
+            articulosAlt(nAlt) = i
+            cantMaxAlt(nAlt) = cargablesPorAlternancia(i)
+        ElseIf MaxX(i) > 0 Then
+            nNoAlt = nNoAlt + 1
+            ReDim Preserve articulosNoAlt(1 To nNoAlt)
+            ReDim Preserve cantMaxNoAlt(1 To nNoAlt)
+            articulosNoAlt(nNoAlt) = i
+            cantMaxNoAlt(nNoAlt) = MaxX(i)
+        End If
+    Next i
+    
+    ' Intento 1.1: Solución Pura (solo artículos de alternancia)
+    If nAlt > 0 Then
+        If BusquedaRecursivaOptimizada(numCamion, Pmin, Pmax, Altmax, pesos, alturas, familias, dict, combinacionesPermitidas, MaxPaqCap, numArticulos, articulosAlt, cantMaxAlt) Then
+            CumplibleAlternancia = 1
+            Exit Function
+        End If
+    End If
+    
+    ' Intento 1.2: Solución Mixta (Saturando los de alternancia y rellenando con el resto)
+    Dim todosLosArt() As Long, cantMinimas() As Long, cantMaximas() As Long
+    ReDim todosLosArt(1 To nAlt + nNoAlt)
+    ReDim cantMinimas(1 To nAlt + nNoAlt)
+    ReDim cantMaximas(1 To nAlt + nNoAlt)
+    
+    ' Primero los de alternancia, que deben cargarse por completo
+    For i = 1 To nAlt
+        todosLosArt(i) = articulosAlt(i)
+        cantMinimas(i) = cantMaxAlt(i) ' Forzamos a que se cargue la cantidad completa
+        cantMaximas(i) = cantMaxAlt(i)
+    Next i
+    ' Luego el resto, que pueden ir de 0 a su máximo
+    For i = 1 To nNoAlt
+        todosLosArt(nAlt + i) = articulosNoAlt(i)
+        cantMinimas(nAlt + i) = 0
+        cantMaximas(nAlt + i) = cantMaxNoAlt(i)
+    Next i
+    
+    If BusquedaRecursivaOptimizada(numCamion, Pmin, Pmax, Altmax, pesos, alturas, familias, dict, combinacionesPermitidas, MaxPaqCap, numArticulos, todosLosArt, cantMaximas, cantMinimas) Then
+        CumplibleAlternancia = 1
+        Exit Function
+    End If
+    
+    ' --- Fase 2: Búsqueda de Grado 2 (Solución Mínima) ---
+    ' Buscamos CUALQUIER combinación válida que incluya AL MENOS 1 unidad de CUALQUIER artículo de alternancia.
+    ' Lo hacemos probando uno por uno.
+    For i = 1 To nAlt
+        ReDim todosLosArt(1 To numArticulos)
+        ReDim cantMinimas(1 To numArticulos)
+        ReDim cantMaximas(1 To numArticulos)
+        k = 1
+        
+        ' Forzamos al artículo 'i' de la alternancia a tener al menos 1 unidad
+        todosLosArt(k) = articulosAlt(i)
+        cantMinimas(k) = 1
+        cantMaximas(k) = MaxX(articulosAlt(i))
+        k = k + 1
+        
+        ' El resto de artículos pueden ir de 0 a su máximo
+        For j = 1 To numArticulos
+            If j <> articulosAlt(i) Then
+                todosLosArt(k) = j
+                cantMinimas(k) = 0
+                cantMaximas(k) = MaxX(j)
+                k = k + 1
+            End If
+        Next j
+
+        If BusquedaRecursivaOptimizada(numCamion, Pmin, Pmax, Altmax, pesos, alturas, familias, dict, combinacionesPermitidas, MaxPaqCap, numArticulos, todosLosArt, cantMaximas, cantMinimas) Then
+            CumplibleAlternancia = 2
+            Exit Function
+        End If
+    Next i
+    
+    ' --- Fase 3: Fallo ---
+    CumplibleAlternancia = -1
+End Function
+
+'--------------------------------------------------------------
+' Funcion Auxiliar: hay al menos un articulo con Altenancia=SI
+'--------------------------------------------------------------
+Private Function HAY_ALMENOS_UN_SI( _
+    ByRef bestSol As Variant, _
+    ByRef alternanciaArticulos As Variant _
+) As Boolean
+    Dim i As Long
+    For i = LBound(alternanciaArticulos) To UBound(alternanciaArticulos)
+        If alternanciaArticulos(i) = "SI" And bestSol(i) > 0 Then
+            HAY_ALMENOS_UN_SI = True
+            Exit Function
+        End If
+    Next
+    HAY_ALMENOS_UN_SI = False
+End Function
+
+
+'====================================================================================
+' JoinSolution: helper para imprimir sol() en el debug
+'====================================================================================
+Private Function JoinSolution(arr() As Long) As String
+    Dim i As Long, s As String
+    For i = LBound(arr) To UBound(arr)
+        s = s & IIf(i > LBound(arr), " , ", "") & arr(i)
+    Next
+    JoinSolution = s
+End Function
+
+'====================================================================================
+' FUNCIÓN PRINCIPAL (ORQUESTADOR)
+'====================================================================================
+Public Function CumplibleOrden( _
+    ByVal numCamion As Long, ByVal ordencarga As Variant, _
+    ByVal CargablesPorOrden As Variant, ByVal MaxX As Variant, _
+    ByVal pesos As Variant, ByVal alturas As Variant, _
+    ByVal familias As Variant, ByVal dict As Object, _
+    ByVal combosPermitidos As Variant, ByVal MaxPaqCap As Variant, _
+    ByVal Pmin As Double, ByVal Pmax As Double, _
+    ByVal Altmax As Double, ByVal numArticulos As Long _
+) As Integer
+
+    Dim i As Long
+    Dim activos As Collection
+    Dim art As Variant ' Necesario para leer la colección
+    Dim OrdenMin As Long
+    Dim articulosOrdenMin As New Collection
+    Dim articulosOtrosActivos As New Collection
+    Dim articulosInactivos As New Collection
+    Dim todosLosActivos As New Collection
+    Dim encontrado As Boolean
+    
+    ' --- 1. Clasificar Artículos y Determinar Orden Mínima ---
+    Set activos = New Collection
+    For i = 1 To numArticulos
+        If ordencarga(1, i) > 0 And CargablesPorOrden(i) > 0 Then
+            On Error Resume Next
+            activos.Add ordencarga(1, i), CStr(i)
+            On Error GoTo 0
+        End If
+    Next
+    
+    If activos.Count = 0 Then CumplibleOrden = 0: Exit Function ' Grado 0
+
+    OrdenMin = 999
+    ' (*** CAMBIO ***) Bucle For...Next para recorrer una colección
+    For i = 1 To activos.Count
+        art = activos(i)
+        If art < OrdenMin Then OrdenMin = art
+    Next i
+    
+    For i = 1 To numArticulos
+        If ordencarga(1, i) > 0 And CargablesPorOrden(i) > 0 Then
+            todosLosActivos.Add i
+            If ordencarga(1, i) = OrdenMin Then
+                articulosOrdenMin.Add i
+            Else
+                articulosOtrosActivos.Add i
+            End If
+        ElseIf MaxX(i) > 0 Then
+             articulosInactivos.Add i
+        End If
+    Next
+    
+    ' --- 2. Búsqueda Jerárquica por Grados y Escenarios ---
+    
+    encontrado = BuscarGrado1_Escenario1(numCamion, Pmin, Pmax, Altmax, pesos, alturas, familias, dict, combosPermitidos, MaxPaqCap, numArticulos, articulosOrdenMin, CargablesPorOrden)
+    If encontrado Then CumplibleOrden = 1: Exit Function
+    
+    encontrado = BuscarGrado1_Escenarios3y4(numCamion, Pmin, Pmax, Altmax, pesos, alturas, familias, dict, combosPermitidos, MaxPaqCap, numArticulos, todosLosActivos, articulosInactivos, CargablesPorOrden, MaxX, False)
+    If encontrado Then CumplibleOrden = 1: Exit Function
+
+    encontrado = BuscarGrado1_Escenarios3y4(numCamion, Pmin, Pmax, Altmax, pesos, alturas, familias, dict, combosPermitidos, MaxPaqCap, numArticulos, todosLosActivos, articulosInactivos, CargablesPorOrden, MaxX, True)
+    If encontrado Then CumplibleOrden = 1: Exit Function
+    
+    encontrado = BuscarGrado2(numCamion, Pmin, Pmax, Altmax, pesos, alturas, familias, dict, combosPermitidos, MaxPaqCap, numArticulos, articulosOrdenMin, MaxX)
+    If encontrado Then CumplibleOrden = 2: Exit Function
+
+    CumplibleOrden = -1
+End Function
+
+
+'====================================================================================
+' BUSCADOR ESPECIALIZADO PARA GRADO 1 - ESCENARIO 1 (SOLO MENOR ORDEN)
+'====================================================================================
+Private Function BuscarGrado1_Escenario1(numCamion As Long, Pmin As Double, Pmax As Double, Altmax As Double, pesos As Variant, alturas As Variant, familias As Variant, dict As Object, combosPermit As Variant, MaxPaqCap As Variant, numArticulos As Long, articulosOrdenMin As Collection, CargPorOrd As Variant) As Boolean
+    Dim articulosAProcesar() As Long
+    Dim cantMaximas() As Long
+    Dim i As Long
+    
+    If articulosOrdenMin.Count = 0 Then Exit Function
+    
+    ReDim articulosAProcesar(1 To articulosOrdenMin.Count)
+    ReDim cantMaximas(1 To articulosOrdenMin.Count)
+    
+    ' (*** CAMBIO ***) Bucle For...Next para poblar los arrays desde la colección
+    For i = 1 To articulosOrdenMin.Count
+        articulosAProcesar(i) = articulosOrdenMin(i)
+        cantMaximas(i) = CargPorOrd(articulosOrdenMin(i))
+    Next i
+    
+    BuscarGrado1_Escenario1 = BusquedaRecursivaOptimizada(numCamion, Pmin, Pmax, Altmax, pesos, alturas, familias, dict, combosPermit, MaxPaqCap, numArticulos, articulosAProcesar, cantMaximas)
+End Function
+
+
+'====================================================================================
+' BUSCADOR ESPECIALIZADO PARA GRADO 1 - ESCENARIOS 3 Y 4
+'====================================================================================
+Private Function BuscarGrado1_Escenarios3y4(numCamion As Long, Pmin As Double, Pmax As Double, Altmax As Double, pesos As Variant, alturas As Variant, familias As Variant, dict As Object, combosPermit As Variant, MaxPaqCap As Variant, numArticulos As Long, todosLosActivos As Collection, articulosInactivos As Collection, CargPorOrd As Variant, MaxX As Variant, esEscenario4 As Boolean) As Boolean
+    Dim articulosAProcesar() As Long
+    Dim cantMinimas() As Long
+    Dim cantMaximas() As Long
+    Dim i As Long, k As Long: k = 1
+    Dim idArticulo As Long
+    Dim totalArticulos As Long: totalArticulos = todosLosActivos.Count + articulosInactivos.Count
+    
+    If totalArticulos = 0 Then Exit Function
+    
+    ReDim articulosAProcesar(1 To totalArticulos)
+    ReDim cantMinimas(1 To totalArticulos)
+    ReDim cantMaximas(1 To totalArticulos)
+    
+    ' (*** CAMBIO ***) Primero los activos
+    For i = 1 To todosLosActivos.Count
+        idArticulo = todosLosActivos(i)
+        articulosAProcesar(k) = idArticulo
+        If Not esEscenario4 Then ' Escenario 3
+            cantMinimas(k) = CargPorOrd(idArticulo)
+            cantMaximas(k) = CargPorOrd(idArticulo)
+        Else ' Escenario 4
+            cantMinimas(k) = CargPorOrd(idArticulo)
+            cantMaximas(k) = MaxX(idArticulo)
+        End If
+        k = k + 1
+    Next i
+    
+    ' (*** CAMBIO ***) Luego los inactivos
+    For i = 1 To articulosInactivos.Count
+        idArticulo = articulosInactivos(i)
+        articulosAProcesar(k) = idArticulo
+        cantMinimas(k) = 0
+        cantMaximas(k) = MaxX(idArticulo)
+        k = k + 1
+    Next i
+    
+    BuscarGrado1_Escenarios3y4 = BusquedaRecursivaOptimizada(numCamion, Pmin, Pmax, Altmax, pesos, alturas, familias, dict, combosPermit, MaxPaqCap, numArticulos, articulosAProcesar, cantMaximas, cantMinimas)
+End Function
+
+'====================================================================================
+' BUSCADOR ESPECIALIZADO PARA GRADO 2
+'====================================================================================
+Private Function BuscarGrado2(numCamion As Long, Pmin As Double, Pmax As Double, Altmax As Double, pesos As Variant, alturas As Variant, familias As Variant, dict As Object, combosPermit As Variant, MaxPaqCap As Variant, numArticulos As Long, articulosOrdenMin As Collection, MaxX As Variant) As Boolean
+    Dim articulosAProcesar() As Long
+    Dim cantMinimas() As Long, cantMaximas() As Long
+    Dim i As Long, k As Long, j As Long, idArticuloPrioritario As Long
+    
+    ' (*** CAMBIO ***) Para cada artículo de la máxima prioridad, intentamos forzar que se cargue al menos 1
+    For i = 1 To articulosOrdenMin.Count
+        idArticuloPrioritario = articulosOrdenMin(i)
+        k = 1
+        ReDim articulosAProcesar(1 To numArticulos)
+        ReDim cantMinimas(1 To numArticulos)
+        ReDim cantMaximas(1 To numArticulos)
+        
+        articulosAProcesar(k) = idArticuloPrioritario
+        cantMinimas(k) = 1
+        cantMaximas(k) = MaxX(idArticuloPrioritario)
+        k = k + 1
+        
+        For j = 1 To numArticulos
+            If j <> idArticuloPrioritario Then
+                articulosAProcesar(k) = j
+                cantMinimas(k) = 0
+                cantMaximas(k) = MaxX(j)
+                k = k + 1
+            End If
+        Next j
+        
+        If BusquedaRecursivaOptimizada(numCamion, Pmin, Pmax, Altmax, pesos, alturas, familias, dict, combosPermit, MaxPaqCap, numArticulos, articulosAProcesar, cantMaximas, cantMinimas) Then
+            BuscarGrado2 = True
+            Exit Function
+        End If
+    Next i
+End Function
+
+'====================================================================================
+' MOTOR DE BÚSQUEDA RECURSIVA - GENÉRICO Y OPTIMIZADO
+'====================================================================================
+Private Function BusquedaRecursivaOptimizada( _
+    numCamion As Long, Pmin As Double, Pmax As Double, Altmax As Double, _
+    pesos As Variant, alturas As Variant, familias As Variant, dict As Object, combosPermit As Variant, _
+    MaxPaqCap As Variant, numArticulos As Long, _
+    articulosAProcesar() As Long, cantMaximas() As Long, Optional cantMinimas As Variant _
+) As Boolean
+    
+    Dim sol() As Long: ReDim sol(1 To numArticulos)
+    Dim pesoMaxRestante() As Double
+    Dim i As Long, idx As Long
+    Dim tieneMinimos As Boolean: tieneMinimos = IsArray(cantMinimas)
+
+    ' Pre-cálculo de peso remanente para la poda Pmin
+    ReDim pesoMaxRestante(1 To UBound(articulosAProcesar) + 1)
+    For i = UBound(articulosAProcesar) To 1 Step -1
+        idx = articulosAProcesar(i)
+        pesoMaxRestante(i) = pesoMaxRestante(i + 1) + (cantMaximas(i) * pesos(1, idx))
+    Next i
+
+    ' Iniciar la búsqueda
+    Call MotorRecursivo(1, 0#, sol, BusquedaRecursivaOptimizada, numCamion, Pmin, Pmax, Altmax, pesos, alturas, _
+        familias, dict, combosPermit, MaxPaqCap, numArticulos, articulosAProcesar, _
+        cantMaximas, cantMinimas, tieneMinimos, pesoMaxRestante)
+End Function
+
+'====================================================================================
+' MOTOR RECURSIVO INTERNO - CON TODAS LAS PODAS
+'====================================================================================
+Private Sub MotorRecursivo( _
+    ByVal pos As Long, ByVal pesoAcum As Double, ByRef sol() As Long, ByRef found As Boolean, _
+    numCamion As Long, Pmin As Double, Pmax As Double, Altmax As Double, _
+    pesos As Variant, alturas As Variant, familias As Variant, dict As Object, combosPermit As Variant, _
+    MaxPaqCap As Variant, numArticulos As Long, _
+    articulosAProcesar() As Long, cantMaximas() As Long, cantMinimas As Variant, tieneMinimos As Boolean, pesoMaxRestante() As Double _
+)
+    Dim q As Long, i As Long
+    Dim nuevoP As Double, alturaT As Double
+    Dim idArticuloActual As Long, qMin As Long, qMax As Long
+
+    If found Then Exit Sub
+    If pesoAcum + pesoMaxRestante(pos) < Pmin Then Exit Sub
+
+    If pos > UBound(articulosAProcesar) Then
+        If pesoAcum >= Pmin Then
+            alturaT = EstimarAlturaGlobal(numCamion, sol, alturas, familias, MaxPaqCap, numArticulos)
+            If alturaT <= Altmax Then found = True
+        End If
+        Exit Sub
+    End If
+
+    idArticuloActual = articulosAProcesar(pos)
+    If tieneMinimos Then
+        qMin = cantMinimas(pos)
+    Else
+        qMin = 0
+    End If
+    qMax = cantMaximas(pos)
+
+    For q = qMin To qMax
+        nuevoP = pesoAcum + q * pesos(1, idArticuloActual)
+        If nuevoP > Pmax Then Exit For
+
+        sol(idArticuloActual) = q
+        
+        If q > 0 Then
+            Dim esCompatibleAhora As Boolean: esCompatibleAhora = True
+            For i = 1 To pos - 1
+                If sol(articulosAProcesar(i)) > 0 Then
+                    If combosPermit(dict(familias(1, articulosAProcesar(i))), dict(familias(1, idArticuloActual))) = 0 Then
+                        esCompatibleAhora = False
+                        Exit For
+                    End If
+                End If
+            Next i
+            If Not esCompatibleAhora Then GoTo SiguienteQ
+        End If
+        
+        MotorRecursivo pos + 1, nuevoP, sol, found, numCamion, Pmin, Pmax, Altmax, pesos, alturas, _
+            familias, dict, combosPermit, MaxPaqCap, numArticulos, articulosAProcesar, _
+            cantMaximas, cantMinimas, tieneMinimos, pesoMaxRestante
+            
+        If found Then Exit Sub
+SiguienteQ:
+    Next q
+    
+    sol(idArticuloActual) = 0 ' Backtracking
+End Sub
+
+
